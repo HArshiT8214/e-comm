@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "name": "hp-printer-ecommerce",
   "builds": [
     {
       "src": "frontend/package.json",
@@ -10,18 +9,18 @@
       }
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "https://your-backend-api.herokuapp.com/api/$1"
+      "source": "/api/(.*)",
+      "destination": "https://e-comm-96k3.onrender.com/api/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/frontend/$1"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "env": {
-    "REACT_APP_API_BASE_URL": "https://your-backend-api.herokuapp.com/api",
+    "REACT_APP_API_BASE_URL": "https://e-comm-96k3.onrender.com/api",
     "REACT_APP_ENVIRONMENT": "production"
   },
   "functions": {
