@@ -43,7 +43,7 @@ check_render_cli() {
 check_render_auth() {
     if ! render auth whoami &> /dev/null; then
         print_status "Please log in to Render..."
-        render auth login
+        render  login
     fi
     print_success "Logged in to Render"
 }
