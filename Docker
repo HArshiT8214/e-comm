@@ -1,72 +1,65 @@
-#  Multi-stage Docker build for HP Printer E-commerce Platform
+# =========================
+# Multi-stage Docker build for HP Printer E-commerce Platform
+# =========================
 
-# Stage 1: Build Frontend
+# ---------- Stage 1: Build Frontend ----------
 FROM node:18-alpine AS frontend-builder
 
+# Set working directory
 WORKDIR /app/frontend
 
-# Copy frontend package files
-COPY frontend/package*.json ./
+# Copy frontend dependencies definition
+COPY ./frontend/package*.json ./
 
-# Install dependencies (production only)
-RUN npm install --omit=dev
-#hello
-
+# Install dependencies (include dev deps for build)
+RUN npm install
 
 # Copy frontend source code
-COPY frontend/ ./
+COPY ./frontend/ ./
 
-# Build frontend
+# Build frontend for production
 RUN npm run build
 
-# Stage 2: Build Backend
+
+# ---------- Stage 2: Build Backend ----------
 FROM node:18-alpine AS backend-builder
 
 WORKDIR /app/backend
 
-# Copy backend package files
-COPY backend/package*.json ./
+# Copy backend dependency files
+COPY ./backend/package*.json ./
 
-# Install backend dependencies
-RUN npm ci --only=production
+# Install only production dependencies
+RUN npm install --omit=dev
 
 # Copy backend source code
-COPY backend/ ./
+COPY ./backend/ ./
 
-# Stage 3: Production Image
+
+# ---------- Stage 3: Final Production Image ----------
 FROM node:18-alpine AS production
 
 # Install PM2 globally
 RUN npm install -g pm2
 
-# Create app directory
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
-# Copy backend from builder stage
+# Copy backend and frontend build
 COPY --from=backend-builder --chown=nextjs:nodejs /app/backend ./backend
-
-# Copy frontend build from builder stage
 COPY --from=frontend-builder --chown=nextjs:nodejs /app/frontend/build ./frontend/build
 
-# Copy PM2 configuration
+# Copy PM2 config and logs setup
 COPY --chown=nextjs:nodejs ecosystem.config.js ./
-
-# Create logs directory
 RUN mkdir -p logs && chown nextjs:nodejs logs
 
-# Switch to non-root user
 USER nextjs
 
-# Expose port
 EXPOSE 3001
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+  CMD node -e "require('http').get('http://localhost:3001/api/health', res => process.exit(res.statusCode === 200 ? 0 : 1))"
 
-# Start the application
 CMD ["pm2-runtime", "start", "ecosystem.config.js", "--env", "production"]
