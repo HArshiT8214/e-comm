@@ -248,3 +248,7 @@ For support, email support@hpprinters.com or create a support ticket in the appl
 - [ ] Analytics and reporting
 - [ ] Multi-language support
 - [ ] Inventory management system
+
+
+
+..........................................................
