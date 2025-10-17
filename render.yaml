@@ -1,0 +1,44 @@
+services:
+  # Backend API Service
+  - type: web
+    name: hp-printer-backend
+    env: node
+    plan: starter
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGIN
+        value: https://your-frontend.onrender.com
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+  # Database Service
+  - type: pserv
+    name: hp-printer-database
+    env: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile.database
+    envVars:
+      - key: MYSQL_ROOT_PASSWORD
+        generateValue: true
+      - key: MYSQL_DATABASE
+        value: hp_printer_shop
+      - key: MYSQL_USER
+        value: hp_user
+      - key: MYSQL_PASSWORD
+        generateValue: true
+
+databases:
+  # External Database (if using managed database)
+  - name: hp-printer-db
+    plan: starter
+    databaseName: hp_printer_shop
+    user: hp_user

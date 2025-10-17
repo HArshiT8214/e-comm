@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: hp-printer-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secure_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-hp_printer_shop_prod}
+      MYSQL_USER: ${MYSQL_USER:-hp_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-secure_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - hp-printer-network
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hp-printer-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: mysql
+      DB_USER: ${MYSQL_USER:-hp_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-secure_password}
+      DB_NAME: ${MYSQL_DATABASE:-hp_printer_shop_prod}
+      DB_PORT: 3306
+      JWT_SECRET: ${JWT_SECRET:-your_super_secure_jwt_secret}
+      JWT_EXPIRES_IN: 7d
+      EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - "3001:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - hp-printer-network
+    volumes:
+      - ./logs:/app/logs
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: hp-printer-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+    networks:
+      - hp-printer-network
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: hp-printer-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - hp-printer-network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  hp-printer-network:
+    driver: bridge
