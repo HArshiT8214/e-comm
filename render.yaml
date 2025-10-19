@@ -16,6 +16,26 @@ services:
         value: 7d
       - key: CORS_ORIGIN
         value: https://your-frontend.vercel.app
+      - key: DB_HOST
+        fromDatabase:
+          name: hp-printer-db
+          property: host
+      - key: DB_USER
+        fromDatabase:
+          name: hp-printer-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: hp-printer-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: hp-printer-db
+          property: database
+      - key: DB_PORT
+        fromDatabase:
+          name: hp-printer-db
+          property: port
     healthCheckPath: /health
     autoDeploy: true
 
