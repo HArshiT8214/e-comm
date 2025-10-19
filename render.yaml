@@ -2,10 +2,9 @@ services:
   # Backend API Service
   - type: web
     name: hp-printer-backend
-    env: node
+    env: docker
     plan: starter
-    buildCommand: cd backend && npm install
-    startCommand: cd backend && npm start
+    dockerfilePath: ./Dockerfile.render
     envVars:
       - key: NODE_ENV
         value: production
@@ -16,8 +15,8 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: CORS_ORIGIN
-        value: https://your-frontend.onrender.com
-    healthCheckPath: /api/health
+        value: https://your-frontend.vercel.app
+    healthCheckPath: /health
     autoDeploy: true
 
   # Database Service
