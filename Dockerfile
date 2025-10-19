@@ -1,52 +1,32 @@
-# Multi-stage build for HP Printer E-commerce Platform
-FROM node:18-alpine AS base
+# Backend-only Dockerfile for HP Printer E-commerce Platform
+FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-COPY backend/package*.json ./backend/
-COPY frontend/package*.json ./frontend/
-
-# Install dependencies
-RUN npm ci --only=production
-
-# Backend build stage
-FROM node:18-alpine AS backend-builder
-WORKDIR /app
-COPY backend/package*.json ./backend/
-RUN cd backend && npm ci --only=production
-
-# Frontend build stage
-FROM node:18-alpine AS frontend-builder
-WORKDIR /app
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci
-COPY frontend/ ./frontend/
-RUN cd frontend && npm run build
-
-# Production stage
-FROM node:18-alpine AS production
 
 # Install PM2 globally
 RUN npm install -g pm2
 
-# Set working directory
-WORKDIR /app
+# Copy backend package files
+COPY backend/package*.json ./backend/
 
-# Copy backend files
-COPY --from=backend-builder /app/backend ./backend
+# Install backend dependencies
+RUN cd backend && npm ci --only=production
 
-# Copy frontend build
-COPY --from=frontend-builder /app/frontend/build ./frontend/build
+# Copy backend source code
+COPY backend/ ./backend/
 
-# Copy other necessary files
+# Copy ecosystem config
 COPY ecosystem.config.js ./
+
+# Copy production start script
 COPY start-production.sh ./
 
 # Make start script executable
 RUN chmod +x start-production.sh
+
+# Create logs directory
+RUN mkdir -p logs
 
 # Expose port
 EXPOSE 3001
