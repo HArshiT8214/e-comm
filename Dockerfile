@@ -16,15 +16,6 @@ RUN cd backend && npm install --only=production
 # Copy backend source code
 COPY backend/ ./backend/
 
-# Copy ecosystem config
-COPY ecosystem.config.js ./
-
-# Copy production start script
-COPY start-production.sh ./
-
-# Make start script executable
-RUN chmod +x start-production.sh
-
 # Create logs directory
 RUN mkdir -p logs
 
@@ -35,5 +26,5 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
-# Start the application
-CMD ["./start-production.sh"]
+# Start the application directly
+CMD ["node", "backend/src/server.js"]
