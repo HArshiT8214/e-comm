@@ -4,7 +4,7 @@ services:
     name: hp-printer-backend
     env: docker
     plan: starter
-    dockerfilePath: ./Dockerfile.render
+    dockerfilePath: ./Docker
     envVars:
       - key: NODE_ENV
         value: production
