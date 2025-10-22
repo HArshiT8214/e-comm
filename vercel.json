@@ -7,24 +7,24 @@
       "config": {
         "distDir": "build"
       }
+    },
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
     }
   ],
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "https://e-comm-96k3.onrender.com/api/$1"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
   "env": {
-    "REACT_APP_API_BASE_URL": "https://e-comm-96k3.onrender.com/api",
+    "REACT_APP_API_BASE_URL": "/api",
     "REACT_APP_ENVIRONMENT": "production"
   },
   "functions": {
-    "frontend/index.html": {
+    "api/**/*.js": {
       "maxDuration": 30
     }
   },
