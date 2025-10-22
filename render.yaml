@@ -18,23 +18,23 @@ services:
         value: https://your-frontend.vercel.app
       - key: DB_HOST
         fromDatabase:
-          name: hp-printer-db
+          name: hp-printer-database
           property: host
       - key: DB_USER
         fromDatabase:
-          name: hp-printer-db
+          name: hp-printer-database
           property: user
       - key: DB_PASSWORD
         fromDatabase:
-          name: hp-printer-db
+          name: hp-printer-database
           property: password
       - key: DB_NAME
         fromDatabase:
-          name: hp-printer-db
+          name: hp-printer-database
           property: database
       - key: DB_PORT
         fromDatabase:
-          name: hp-printer-db
+          name: hp-printer-database
           property: port
     healthCheckPath: /health
     autoDeploy: true
@@ -57,7 +57,7 @@ services:
 
 databases:
   # External Database (if using managed database)
-  - name: hp-printer-db
+  - name: hp-printer-database
     plan: starter
     databaseName: hp_printer_shop
     user: hp_user
