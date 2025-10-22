@@ -7,10 +7,6 @@
       "config": {
         "distDir": "build"
       }
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
     }
   ],
   "rewrites": [
@@ -22,11 +18,6 @@
   "env": {
     "REACT_APP_API_BASE_URL": "/api",
     "REACT_APP_ENVIRONMENT": "production"
-  },
-  "functions": {
-    "api/**/*.js": {
-      "maxDuration": 30
-    }
   },
   "headers": [
     {
