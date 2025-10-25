@@ -8,8 +8,8 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/seed.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "render:deploy": "cd .. && ./deploy-backend-render.sh deploy",
-    "render:manual": "cd .. && ./deploy-backend-render.sh manual"
+    "vercel-build": "npm run build"
+
   },
   "keywords": ["ecommerce", "hp", "printers", "api"],
   "author": "",
