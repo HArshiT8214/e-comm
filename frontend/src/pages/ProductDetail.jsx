@@ -1,0 +1,354 @@
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import './ProductDetail.css';
+import logo from '../components/Assets/logo.png';
+// import cartIcon from '../components/Assets/cart-icon.jpg';
+import { getProductById } from '../services/api';
+import { useCart } from '../context/CartContext.jsx';
+
+const ProductDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [selectedImage, setSelectedImage] = useState(0);
+  const [quantity, setQuantity] = useState(1);
+  const [activeTab, setActiveTab] = useState('description');
+  const [rating, setRating] = useState(0);
+  const [reviewForm, setReviewForm] = useState({
+    review: '',
+    name: '',
+    email: ''
+  });
+  const [product, setProduct] = useState(null);
+  const { addItem } = useCart();
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const p = await getProductById(id);
+      if (!mounted) return;
+      setProduct({
+        ...p,
+        images: [p.image_url || logo, logo, logo],
+        originalPrice: p.price * 1.2,
+        discountedPrice: p.price,
+        discount: 20,
+        reviewCount: 0,
+        highlights: ['Wireless', 'Fast Printing', 'HP Quality'],
+        specifications: [
+          { category: 'Brand', details: p.brand || 'HP' },
+          { category: 'SKU', details: p.sku },
+          { category: 'Category', details: String(p.category_id) }
+        ],
+      });
+    })();
+    return () => { mounted = false; };
+  }, [id]);
+
+  const relatedProducts = [
+    {
+      id: 2,
+      name: 'HP OfficeJet Pro 9135e Wireless All-in-One Printer with Bonus 3 Months Instant Ink',
+      originalPrice: 399.99,
+      discountedPrice: 299.99,
+      discount: 25,
+      image: logo
+    },
+    {
+      id: 3,
+      name: 'HP OfficeJet Pro 8139e Wireless All-in-One Printer with 1 Full Year Instant Ink with HP+',
+      originalPrice: 259.99,
+      discountedPrice: 169.99,
+      discount: 35,
+      image: logo,
+      rating: 5
+    },
+    {
+      id: 4,
+      name: 'HP Pavilion Laptop 16, Windows 11 Home, 16", Intel® Core™ Ultra 7, 16GB RAM, 512GB SSD, 2K, Natural silver',
+      originalPrice: 979.99,
+      discountedPrice: 679.99,
+      discount: 31,
+      image: logo,
+      rating: 5
+    },
+    {
+      id: 5,
+      name: 'HP Pavilion Laptop 16t-af000, 16"',
+      originalPrice: 1499.99,
+      discountedPrice: 1299.99,
+      discount: 13,
+      image: logo
+    }
+  ];
+
+  const handleQuantityChange = (delta) => {
+    const newQuantity = Math.max(1, quantity + delta);
+    setQuantity(newQuantity);
+  };
+
+  const handleAddToCart = () => {
+    if (!product) return;
+    addItem({ product_id: product.product_id, name: product.name, price: Number(product.price), image_url: product.image_url }, quantity);
+  };
+
+  const handleReviewSubmit = (e) => {
+    e.preventDefault();
+    console.log('Review submitted:', { rating, ...reviewForm });
+  };
+
+  const handleRelatedProductClick = (productId) => {
+    navigate(`/product/${productId}`);
+  };
+
+  const renderStars = (rating) => {
+    return Array.from({ length: 5 }, (_, index) => (
+      <span key={index} className={`star ${index < rating ? 'filled' : ''}`}>
+        ★
+      </span>
+    ));
+  };
+
+  if (!product) return <div className="product-detail-page">Loading...</div>;
+
+  return (
+    <div className="product-detail-page">
+      {/* Breadcrumbs */}
+      <div className="breadcrumbs">
+        <span>Home</span>
+        <span>/</span>
+        <span>Printers</span>
+        <span>/</span>
+        <span>{product.name.substring(0, 50)}...</span>
+      </div>
+
+      <div className="product-content">
+        {/* Left Section - Product Images */}
+        <div className="product-images-section">
+          <div className="image-gallery">
+            <div className="thumbnail-images">
+              {product.images.map((image, index) => (
+                <img
+                  key={index}
+                  src={image}
+                  alt={`${product.name} view ${index + 1}`}
+                  className={`thumbnail ${selectedImage === index ? 'active' : ''}`}
+                  onClick={() => setSelectedImage(index)}
+                />
+              ))}
+            </div>
+            <div className="main-image-container">
+              <div className="discount-badge">-{20}%</div>
+              <img
+                src={product.images[selectedImage]}
+                alt={product.name}
+                className="main-image"
+              />
+              <div className="image-controls">
+                <button className="nav-arrow left">‹</button>
+                <button className="nav-arrow right">›</button>
+                <button className="zoom-icon">🔍</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Section - Product Details */}
+        <div className="product-details-section">
+          <h1 className="product-title">{product.name}</h1>
+          
+          <div className="product-price">
+            <span className="original-price">${Number(product.originalPrice).toFixed(2)}</span>
+            <span className="discounted-price">${Number(product.discountedPrice).toFixed(2)}</span>
+          </div>
+
+          <div className="product-rating">
+            {renderStars(5)}
+            <span className="review-count">({0} customer review)</span>
+          </div>
+
+          <div className="product-highlights">
+            <ul>
+              {product.highlights.map((highlight, index) => (
+                <li key={index}>{highlight}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="product-actions">
+            <div className="quantity-control">
+              <button onClick={() => handleQuantityChange(-1)}>-</button>
+              <span>{quantity}</span>
+              <button onClick={() => handleQuantityChange(1)}>+</button>
+            </div>
+            <button className="add-to-cart-btn" onClick={handleAddToCart}>
+              ADD TO CART
+            </button>
+            <div className="ai-icon">🧠</div>
+          </div>
+
+          <div className="product-meta">
+            <div className="meta-item">
+              <strong>SKU:</strong> {product.sku}
+            </div>
+            <div className="meta-item">
+              <strong>Categories:</strong> {String(product.category_id)}
+            </div>
+            <div className="meta-item">
+              <strong>Tag:</strong> #HP
+            </div>
+            <div className="meta-item">
+              <strong>Brand:</strong> {product.brand || 'HP'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Payment and Trust Badges */}
+      <div className="trust-section">
+        <div className="payment-methods">
+          <span>PayPal</span>
+          <span>Visa</span>
+          <span>MasterCard</span>
+          <span>American Express</span>
+          <span>Discover Network</span>
+        </div>
+        <div className="security-badge">
+          <span>McAfee SECURE</span>
+        </div>
+        <div className="trust-badges">
+          <div className="trust-badge">MONEY BACK 30 DAY GUARANTEE</div>
+          <div className="trust-badge">SATISFACTION 100% GUARANTEED</div>
+          <div className="trust-badge">BEST CHOICE</div>
+          <div className="trust-badge">BEST ORIGINAL PRODUCT</div>
+        </div>
+      </div>
+
+      {/* Tabs Section */}
+      <div className="product-tabs">
+        <div className="tab-buttons">
+          <button
+            className={`tab-btn ${activeTab === 'description' ? 'active' : ''}`}
+            onClick={() => setActiveTab('description')}
+          >
+            Description
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'reviews' ? 'active' : ''}`}
+            onClick={() => setActiveTab('reviews')}
+          >
+            Reviews ({0})
+          </button>
+        </div>
+
+        <div className="tab-content">
+          {activeTab === 'description' && (
+            <div className="description-tab">
+              <h3>Technical Details</h3>
+              <table className="specifications-table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {product.specifications.map((spec, index) => (
+                    <tr key={index}>
+                      <td>{spec.category}</td>
+                      <td>{spec.details}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === 'reviews' && (
+            <div className="reviews-tab">
+              <p>There are no reviews yet.</p>
+              <form className="review-form" onSubmit={handleReviewSubmit}>
+                <p className="form-note">Your email address will not be published. Required fields are marked *</p>
+                
+                <div className="form-group">
+                  <label>Your rating *</label>
+                  <div className="rating-input">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <span
+                        key={star}
+                        className={`star-input ${star <= rating ? 'filled' : ''}`}
+                        onClick={() => setRating(star)}
+                      >
+                        ★
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Your review *</label>
+                  <textarea
+                    value={reviewForm.review}
+                    onChange={(e) => setReviewForm({...reviewForm, review: e.target.value})}
+                    required
+                    rows="6"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Name *</label>
+                  <input
+                    type="text"
+                    value={reviewForm.name}
+                    onChange={(e) => setReviewForm({...reviewForm, name: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Email *</label>
+                  <input
+                    type="email"
+                    value={reviewForm.email}
+                    onChange={(e) => setReviewForm({...reviewForm, email: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <button type="submit" className="submit-review-btn">SUBMIT</button>
+              </form>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Related Products */}
+      <div className="related-products">
+        <h2>Related products</h2>
+        <div className="products-grid">
+          {relatedProducts.map((relatedProduct) => (
+            <div 
+              key={relatedProduct.id} 
+              className="product-card" 
+              onClick={() => handleRelatedProductClick(relatedProduct.id)}
+            >
+              <div className="product-discount">-{relatedProduct.discount}%</div>
+              <img src={relatedProduct.image} alt={relatedProduct.name} />
+              <h3>{relatedProduct.name}</h3>
+              {relatedProduct.rating && (
+                <div className="product-rating-small">
+                  {renderStars(relatedProduct.rating)}
+                </div>
+              )}
+              <div className="product-price-small">
+                <span className="original-price">${relatedProduct.originalPrice.toFixed(2)}</span>
+                <span className="discounted-price">${relatedProduct.discountedPrice.toFixed(2)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ProductDetail;
