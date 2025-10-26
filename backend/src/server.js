@@ -17,12 +17,13 @@ const supportRoutes = require('./routes/support');
 const adminRoutes = require('./routes/admin');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3001; // Kept for local testing, but ignored by Vercel
 
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration (Note: This is technically unnecessary when proxying within Vercel, 
+// but is good practice for local testing and external services.)
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
@@ -74,45 +75,16 @@ app.use((req, res) => {
 // Error handling middleware
 app.use(errorHandler);
 
-// Start server
-const startServer = async () => {
-  try {
-    // Test database connection
-    await testConnection();
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
-      console.log(`❤️  Health Check: http://localhost:${PORT}/health`);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error.message);
-    process.exit(1);
-  }
-};
+// ---------------------------------------------------------------------------------
+// ⚠️ CRITICAL CHANGE: Export the Express app instance for Vercel Serverless execution.
+// ---------------------------------------------------------------------------------
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-  process.exit(1);
-});
+// The original startServer() and app.listen() block has been removed as Vercel handles 
+// starting the server. Only the export is needed.
+module.exports = app;
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------------
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-startServer();
+// Keep the database connection test running outside the Express flow if necessary, 
+// but ensure it doesn't block the export. For simplicity, the remaining process 
+// handlers have been omitted as Vercel handles these automatically.
