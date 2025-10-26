@@ -12,19 +12,19 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/backend/$1" },   
-    { "src": "/(.*)", "dest": "/frontend/build/$1" }
+    { "src": "/api/(.*)", "dest": "/backend/$1" }
   ],
   "rewrites": [
     {
       "source": "/((?!api).*)",
-      "destination": "/index.html"
+      "destination": "/frontend/build/index.html" 
     }
   ],
   "env": {
     "REACT_APP_API_BASE_URL": "/api",
     "REACT_APP_ENVIRONMENT": "production"
   },
+
   "headers": [
     {
       "source": "/(.*)",
