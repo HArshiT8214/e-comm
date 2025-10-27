@@ -4,17 +4,17 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const { testConnection } = require('./config/database');
-const errorHandler = require('./middleware/errorHandler');
+const { testConnection } = require('./src/config/database');
+const errorHandler = require('./src/middleware/errorHandler');
 
 // Import routes
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const cartRoutes = require('./routes/cart');
-const orderRoutes = require('./routes/orders');
-const reviewRoutes = require('./routes/reviews');
-const supportRoutes = require('./routes/support');
-const adminRoutes = require('./routes/admin');
+const authRoutes = require('./src/routes/auth');
+const productRoutes = require('./src/routes/products');
+const cartRoutes = require('./src/routes/cart');
+const orderRoutes = require('./src/routes/orders');
+const reviewRoutes = require('./src/routes/reviews');
+const supportRoutes = require('./src/routes/support');
+const adminRoutes = require('./src/routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001; // Kept for local testing, but ignored by Vercel
