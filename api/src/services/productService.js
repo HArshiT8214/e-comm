@@ -527,60 +527,218 @@
 // ----------------- new  -------------------
 
 const { pool } = require('../config/database');
-const { getPagination } = require('../utils/helpers');
+const { getPagination } = require('../utils/helpers'); // Still requires helper
 
 class ProductService {
 
-
-  async getProducts({ page = 1, limit = 20, sort_by = "created_at", sort_order = "DESC" }) {
-    const offset = (page - 1) * limit;
-    const queryParams = [];
-
-    const productsQuery = `
-      SELECT 
-        p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
-        p.image_url, p.brand, p.created_at,
-        c.name as category_name, c.category_id,
-        COALESCE(AVG(r.rating), 0) as average_rating,
-        COUNT(r.review_id) as review_count
-      FROM products p
-      LEFT JOIN categories c ON p.category_id = c.category_id
-      LEFT JOIN reviews r ON p.product_id = r.product_id
-      WHERE p.is_active = 1
-      GROUP BY p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
-               p.image_url, p.brand, p.created_at, c.name, c.category_id
-      ORDER BY p.${sort_by} ${sort_order}
-      LIMIT ${Number(limit)} OFFSET ${Number(offset)}
-    `;
-
-    const productParams = [...queryParams, Number(limit), Number(offset)];
-    console.log("👉 Final Params:", productParams);
-
-    const [products] = await pool.execute(productsQuery, productParams);
-
-    // Count query for pagination
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM products p
-      WHERE p.is_active = 1
-    `;
-    const [countResult] = await pool.execute(countQuery, queryParams || []);
-    const total = countResult[0].total;
-
-    return {
-      success: true,
-      data: {
-        products,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      },
-    };
+  // Converts MySQL positional parameters to PostgreSQL's $1, $2, $3...
+  static buildPostgresQuery(sql, params) {
+    let index = 1;
+    let newSql = sql.replace(/\?/g, () => `$${index++}`);
+    return [newSql, params];
   }
 
+  // Helper function to query the pool and return the results array
+  async executeQuery(sql, params) {
+    const [query, pgParams] = ProductService.buildPostgresQuery(sql, params);
+    // Use pool.query for pg, not pool.execute
+    const result = await pool.query(query, pgParams);
+    // For pg, results are in result.rows, not a destructured array [rows]
+    return result.rows; 
+  }
+
+
+  async getProducts(filters = {}) {
+    const {
+      page = 1,
+      limit = 10,
+      category_id,
+      search,
+      min_price,
+      max_price,
+      in_stock,
+      sort_by = 'created_at',
+      sort_order = 'DESC'
+    } = filters;
+
+    // Assuming getPagination works as intended, providing limit and offset
+    // If you use the version I defined in the old comment, replace this line.
+    const { offset, limit: queryLimit } = getPagination(page, limit);
+
+    try {
+      let whereConditions = ['p.is_active = TRUE']; // PostgreSQL boolean
+      let queryParams = [];
+
+      // --- Filters ---
+      if (category_id) {
+        whereConditions.push('p.category_id = ?');
+        queryParams.push(category_id);
+      }
+
+      if (search) {
+        const term = String(search).trim();
+        // PostgreSQL uses ILIKE for case-insensitive search
+        whereConditions.push('(p.name ILIKE ? OR p.description ILIKE ? OR p.sku ILIKE ?)');
+        const likeTerm = `%${term}%`;
+        queryParams.push(likeTerm, likeTerm, likeTerm);
+      }
+
+      if (min_price) {
+        whereConditions.push('p.price >= ?');
+        queryParams.push(min_price);
+      }
+
+      if (max_price) {
+        whereConditions.push('p.price <= ?');
+        queryParams.push(max_price);
+      }
+
+      if (in_stock) {
+        whereConditions.push('p.stock_quantity > 0');
+      }
+
+      const whereClause =
+        whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+      // --- Sorting (whitelisted) ---
+      const allowedSortBy = ['created_at', 'price', 'name', 'stock_quantity'];
+      const allowedSortOrder = ['ASC', 'DESC'];
+
+      const sortBy = allowedSortBy.includes(sort_by) ? sort_by : 'created_at';
+      const sortOrder = allowedSortOrder.includes(sort_order.toUpperCase())
+        ? sort_order.toUpperCase()
+        : 'DESC';
+
+      // --- Count query ---
+      const countQuery = `
+        SELECT COUNT(*) as total 
+        FROM products p 
+        ${whereClause}
+      `;
+      // Execute count query
+      const countResult = await this.executeQuery(countQuery, queryParams);
+      const total = parseInt(countResult[0].total);
+
+      // --- Products query ---
+      const productsQuery = `
+        SELECT 
+          p.product_id,
+          p.name,
+          p.description,
+          p.price,
+          p.stock_quantity,
+          p.sku,
+          p.image_url,
+          p.brand,
+          p.created_at,
+          c.name as category_name,
+          c.category_id,
+          COALESCE(AVG(r.rating), 0) as average_rating,
+          COUNT(r.review_id) as review_count
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.category_id
+        LEFT JOIN reviews r ON p.product_id = r.product_id
+        ${whereClause}
+        GROUP BY 
+          p.product_id, c.category_id, c.name -- Simplify GROUP BY for PostgreSQL
+        ORDER BY p.${sortBy} ${sortOrder}
+        LIMIT ? OFFSET ? -- Use MySQL placeholders temporarily, they are handled below
+      `;
+
+      // Pagination parameters are added to the end
+      const productParams = [...queryParams, queryLimit, offset]; 
+
+      // Execute products query
+      const products = await this.executeQuery(productsQuery, productParams);
+
+      // --- Attach product images ---
+      for (let product of products) {
+        const imagesQuery = 'SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order';
+        const images = await this.executeQuery(imagesQuery, [product.product_id]);
+        product.images = images;
+      }
+
+      return {
+        success: true,
+        data: {
+          products,
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            pages: Math.ceil(total / limit)
+          }
+        }
+      };
+    } catch (error) {
+      // Logging the failure to help debug connection/syntax issues
+      console.error('❌ POSTGRESQL SQL ERROR in getProducts:', error.message, error.stack); 
+      throw new Error(`Failed to get products: ${error.message}`);
+    }
+  }
+
+
+  // --- Other methods (Simplified for brevity, but all must be converted) ---
+
+  async searchProducts(searchTerm, filters = {}) {
+    try {
+      return await this.getProducts({ ...filters, search: String(searchTerm) });
+    } catch (error) {
+      throw new Error(`Failed to search products: ${error.message}`);
+    }
+  }
+
+  async getProductById(productId) {
+    try {
+      const productsQuery = `
+        SELECT 
+          p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
+          p.image_url, p.brand, p.created_at, c.name as category_name, c.category_id,
+          COALESCE(AVG(r.rating), 0) as average_rating, COUNT(r.review_id) as review_count
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.category_id
+        LEFT JOIN reviews r ON p.product_id = r.product_id
+        WHERE p.product_id = ? AND p.is_active = TRUE
+        GROUP BY p.product_id, c.category_id, c.name
+      `;
+      const products = await this.executeQuery(productsQuery, [productId]);
+
+      if (products.length === 0) {
+        throw new Error('Product not found');
+      }
+      const product = products[0];
+      const images = await this.executeQuery('SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order', [productId]);
+      product.images = images;
+      
+      const relatedProductsQuery = `
+        SELECT product_id, name, price, image_url, sku
+        FROM products 
+        WHERE category_id = ? AND product_id != ? AND is_active = TRUE
+        LIMIT 4
+      `;
+      const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_id, productId]);
+      product.related_products = relatedProducts;
+
+      return { success: true, data: product };
+    } catch (error) {
+      throw new Error(`Failed to get product: ${error.message}`);
+    }
+  }
+
+  // --- All other methods must be similarly converted to use this.executeQuery() ---
+
+  async getCategories() {
+    // Implement getCategories using this.executeQuery
+    throw new Error("getCategories not implemented for PostgreSQL yet.");
+  }
+  
+  async createProduct() {
+    // Implement createProduct using this.executeQuery
+    throw new new Error("createProduct not implemented for PostgreSQL yet.");
+  }
+}
+
+module.exports = new ProductService();
 
 
 
