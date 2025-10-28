@@ -142,9 +142,9 @@
 
 const express = require('express');
 const router = express.Router();
-const productService = require('../services/productService');
-const { authenticateToken, requireRole, optionalAuth } = require('../middleware/auth');
-const { validateProduct, validateProductId } = require('../middleware/validation');
+const productService = require('../services/productService'); // <- MUST be fixed if file path changes
+const { authenticateToken, requireRole, optionalAuth } = require('../middleware/auth'); // <- MUST be fixed if file path changes
+const { validateProduct, validateProductId } = require('../middleware/validation'); // <- MUST be fixed if file path changes
 
 // Get all products with filters
 router.get('/', async (req, res) => {
@@ -156,7 +156,7 @@ router.get('/', async (req, res) => {
       sort_by,
       sort_order,
     });
-    res.json(result); // ✅ no double wrapping
+    res.json(result);
   } catch (err) {
     console.error('Error fetching products:', err);
     res.status(500).json({ success: false, message: 'Failed to get products' });
