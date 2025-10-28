@@ -2,23 +2,43 @@ const { pool } = require('../config/database');
 const { calculateOrderTotals } = require('../utils/helpers');
 
 class CartService {
+
+  /**
+   * Helper functions for PostgreSQL execution (Must be copied from productService.js)
+   */
+  static buildPostgresQuery(sql, params) {
+    if (!params) return [sql, []];
+    let index = 1;
+    const newSql = sql.replace(/\?/g, () => `$${index++}`);
+    return [newSql, params];
+  }
+
+  /**
+   * Executes a database query using the pg pool.
+   */
+  async executeQuery(sql, params = []) {
+    const [query, pgParams] = CartService.buildPostgresQuery(sql, params);
+    const result = await pool.query(query, pgParams);
+    return result.rows;
+  }
+
   // Get or create cart for user
   async getOrCreateCart(userId) {
     try {
       // Check if cart exists
-      let [carts] = await pool.execute(
+      let carts = await this.executeQuery(
         'SELECT cart_id FROM carts WHERE user_id = ?',
         [userId]
       );
 
       let cartId;
       if (carts.length === 0) {
-        // Create new cart
-        const [result] = await pool.execute(
-          'INSERT INTO carts (user_id) VALUES (?)',
+        // Create new cart and use RETURNING to get ID
+        const result = await this.executeQuery(
+          'INSERT INTO carts (user_id) VALUES (?) RETURNING cart_id',
           [userId]
         );
-        cartId = result.insertId;
+        cartId = result[0].cart_id;
       } else {
         cartId = carts[0].cart_id;
       }
@@ -34,19 +54,12 @@ class CartService {
     try {
       const cartId = await this.getOrCreateCart(userId);
 
-      const [items] = await pool.execute(
+      const items = await this.executeQuery(
         `SELECT 
-          ci.cart_item_id,
-          ci.product_id,
-          ci.quantity,
-          ci.unit_price,
-          ci.added_at,
-          p.name,
-          p.image_url,
-          p.sku,
-          p.stock_quantity,
-          p.brand
+          ci.cart_item_id, ci.product_id, ci.quantity, ci.unit_price, ci.added_at,
+          p.name, p.image_url, p.sku, p.stock_quantity, p.brand
         FROM cart_items ci
+        JOIN carts c ON ci.cart_id = c.cart_id
         JOIN products p ON ci.product_id = p.product_id
         WHERE ci.cart_id = ?
         ORDER BY ci.added_at DESC`,
@@ -71,117 +84,125 @@ class CartService {
 
   // Add item to cart
   async addToCart(userId, productId, quantity = 1) {
+    const client = await pool.connect();
     try {
-      // Verify product exists and is in stock
-      const [products] = await pool.execute(
-        'SELECT product_id, price, stock_quantity FROM products WHERE product_id = ? AND is_active = 1',
+      await client.query('BEGIN');
+
+      // 1. Verify product exists and is in stock
+      const productsResult = await client.query(
+        'SELECT product_id, price, stock_quantity FROM products WHERE product_id = $1 AND is_active = TRUE',
         [productId]
       );
 
-      if (products.length === 0) {
+      if (productsResult.rows.length === 0) {
         throw new Error('Product not found');
       }
 
-      const product = products[0];
+      const product = productsResult.rows[0];
       if (product.stock_quantity < quantity) {
         throw new Error('Insufficient stock');
       }
 
       const cartId = await this.getOrCreateCart(userId);
 
-      // Check if item already in cart
-      const [existingItems] = await pool.execute(
-        'SELECT cart_item_id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ?',
+      // 2. Check if item already in cart
+      const existingItemsResult = await client.query(
+        'SELECT cart_item_id, quantity FROM cart_items WHERE cart_id = $1 AND product_id = $2',
         [cartId, productId]
       );
 
-      if (existingItems.length > 0) {
+      if (existingItemsResult.rows.length > 0) {
         // Update existing item
-        const newQuantity = existingItems[0].quantity + quantity;
+        const existingItem = existingItemsResult.rows[0];
+        const newQuantity = existingItem.quantity + quantity;
+
         if (newQuantity > product.stock_quantity) {
           throw new Error('Insufficient stock for requested quantity');
         }
 
-        await pool.execute(
-          'UPDATE cart_items SET quantity = ?, unit_price = ? WHERE cart_item_id = ?',
-          [newQuantity, product.price, existingItems[0].cart_item_id]
+        await client.query(
+          'UPDATE cart_items SET quantity = $1, unit_price = $2 WHERE cart_item_id = $3',
+          [newQuantity, product.price, existingItem.cart_item_id]
         );
       } else {
         // Add new item
-        await pool.execute(
-          'INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)',
+        await client.query(
+          'INSERT INTO cart_items (cart_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)',
           [cartId, productId, quantity, product.price]
         );
       }
 
-      return {
-        success: true,
-        message: 'Item added to cart successfully'
-      };
+      await client.query('COMMIT');
+      return { success: true, message: 'Item added to cart successfully' };
     } catch (error) {
+      await client.query('ROLLBACK');
       throw new Error(`Failed to add to cart: ${error.message}`);
+    } finally {
+      client.release();
     }
   }
 
   // Update cart item quantity
   async updateCartItem(userId, cartItemId, quantity) {
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN');
+
       if (quantity < 1) {
         throw new Error('Quantity must be at least 1');
       }
 
-      // Verify cart item belongs to user
-      const [cartItems] = await pool.execute(
+      // Verify cart item belongs to user and get stock
+      const cartItemsResult = await client.query(
         `SELECT ci.cart_item_id, ci.product_id, p.stock_quantity, p.price
          FROM cart_items ci
          JOIN carts c ON ci.cart_id = c.cart_id
          JOIN products p ON ci.product_id = p.product_id
-         WHERE ci.cart_item_id = ? AND c.user_id = ?`,
+         WHERE ci.cart_item_id = $1 AND c.user_id = $2`,
         [cartItemId, userId]
       );
 
-      if (cartItems.length === 0) {
+      if (cartItemsResult.rows.length === 0) {
         throw new Error('Cart item not found');
       }
 
-      const cartItem = cartItems[0];
+      const cartItem = cartItemsResult.rows[0];
       if (quantity > cartItem.stock_quantity) {
         throw new Error('Insufficient stock');
       }
 
-      await pool.execute(
-        'UPDATE cart_items SET quantity = ?, unit_price = ? WHERE cart_item_id = ?',
+      await client.query(
+        'UPDATE cart_items SET quantity = $1, unit_price = $2, updated_at = CURRENT_TIMESTAMP WHERE cart_item_id = $3',
         [quantity, cartItem.price, cartItemId]
       );
 
-      return {
-        success: true,
-        message: 'Cart item updated successfully'
-      };
+      await client.query('COMMIT');
+      return { success: true, message: 'Cart item updated successfully' };
     } catch (error) {
+      await client.query('ROLLBACK');
       throw new Error(`Failed to update cart item: ${error.message}`);
+    } finally {
+      client.release();
     }
   }
 
   // Remove item from cart
   async removeFromCart(userId, cartItemId) {
     try {
-      // Verify cart item belongs to user
-      const [result] = await pool.execute(
-        `DELETE ci FROM cart_items ci
-         JOIN carts c ON ci.cart_id = c.cart_id
-         WHERE ci.cart_item_id = ? AND c.user_id = ?`,
+      // Verify cart item belongs to user and delete
+      const result = await pool.query(
+        `DELETE FROM cart_items ci
+         USING carts c
+         WHERE ci.cart_id = c.cart_id
+         AND ci.cart_item_id = $1 AND c.user_id = $2`,
         [cartItemId, userId]
       );
-
-      if (result.affectedRows === 0) {
+      // pg returns rowCount, not affectedRows
+      if (result.rowCount === 0) {
         throw new Error('Cart item not found');
       }
 
-      return {
-        success: true,
-        message: 'Item removed from cart successfully'
-      };
+      return { success: true, message: 'Item removed from cart successfully' };
     } catch (error) {
       throw new Error(`Failed to remove from cart: ${error.message}`);
     }
@@ -192,15 +213,12 @@ class CartService {
     try {
       const cartId = await this.getOrCreateCart(userId);
 
-      await pool.execute(
-        'DELETE FROM cart_items WHERE cart_id = ?',
+      await pool.query(
+        'DELETE FROM cart_items WHERE cart_id = $1',
         [cartId]
       );
 
-      return {
-        success: true,
-        message: 'Cart cleared successfully'
-      };
+      return { success: true, message: 'Cart cleared successfully' };
     } catch (error) {
       throw new Error(`Failed to clear cart: ${error.message}`);
     }
@@ -211,17 +229,13 @@ class CartService {
     try {
       const cartId = await this.getOrCreateCart(userId);
 
-      const [result] = await pool.execute(
-        'SELECT SUM(quantity) as total_items FROM cart_items WHERE cart_id = ?',
+      const result = await pool.query(
+        'SELECT COALESCE(SUM(quantity), 0) as total_items FROM cart_items WHERE cart_id = $1',
         [cartId]
       );
 
-      return {
-        success: true,
-        data: {
-          count: result[0].total_items || 0
-        }
-      };
+      // COALESCE ensures total_items is a number, even if cart is empty
+      return { success: true, data: { count: parseInt(result.rows[0].total_items) } };
     } catch (error) {
       throw new Error(`Failed to get cart count: ${error.message}`);
     }
@@ -237,20 +251,17 @@ class CartService {
 
       for (const item of items) {
         // Check if product still exists and is active
-        const [products] = await pool.execute(
-          'SELECT product_id, name, stock_quantity, price FROM products WHERE product_id = ? AND is_active = 1',
+        const productsResult = await this.executeQuery(
+          'SELECT product_id, name, stock_quantity, price FROM products WHERE product_id = ? AND is_active = TRUE',
           [item.product_id]
         );
 
-        if (products.length === 0) {
-          validationErrors.push({
-            product_id: item.product_id,
-            error: 'Product no longer available'
-          });
+        if (productsResult.length === 0) {
+          validationErrors.push({ product_id: item.product_id, error: 'Product no longer available' });
           continue;
         }
 
-        const product = products[0];
+        const product = productsResult[0];
 
         // Check stock availability
         if (product.stock_quantity < item.quantity) {
@@ -261,7 +272,7 @@ class CartService {
         }
 
         // Check price changes
-        if (product.price !== item.unit_price) {
+        if (parseFloat(product.price) !== parseFloat(item.unit_price)) { // Compare as floats/numbers
           validationErrors.push({
             product_id: item.product_id,
             error: `Price changed from $${item.unit_price} to $${product.price}`
