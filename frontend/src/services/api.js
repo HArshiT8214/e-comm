@@ -16,7 +16,10 @@ const removeAuthToken = () => {
   localStorage.removeItem('authToken');
 };
 
-// Generic API request function
+/**
+ * Generic API request function
+ * Handles adding the auth token, checking response status, and parsing JSON.
+ */
 async function apiRequest(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
   const token = getAuthToken();
@@ -24,23 +27,48 @@ async function apiRequest(endpoint, options = {}) {
   const config = {
     headers: {
       'Content-Type': 'application/json',
+      // Attach the token if available
       ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
-    ...options,
+    // Prevent content-type being set if body is FormData/not JSON
+    ...options, 
   };
 
   try {
     const response = await fetch(url, config);
-    const data = await response.json();
+    const contentType = response.headers.get('content-type');
+    
+    let data;
+
+    // --- CRITICAL FIX START ---
+    // Check if the response is JSON before calling response.json()
+    if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+    } else {
+        // If it's not JSON (e.g., HTML from a server error/redirect), 
+        // try to get the text for a better error message, but the result 
+        // will still be an error if response.ok is false.
+        data = await response.text();
+    }
+    // --- CRITICAL FIX END ---
 
     if (!response.ok) {
-      // Handle authentication errors
+      // Handle 401 Unauthorized globally
       if (response.status === 401) {
         removeAuthToken();
-        window.location.href = '/login';
+        // Redirect only if it's the main browser window
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
       }
-      throw new Error(data.message || `HTTP ${response.status}`);
+      
+      // Throw an error with the message from the server (if JSON) or status
+      const errorMessage = typeof data === 'object' && data.message 
+                           ? data.message 
+                           : `HTTP ${response.status} - Unexpected response format: ${String(data).substring(0, 100)}...`;
+      
+      throw new Error(errorMessage);
     }
 
     return data;
@@ -50,7 +78,7 @@ async function apiRequest(endpoint, options = {}) {
   }
 }
 
-// Auth API
+// Auth API (No changes needed)
 export const authAPI = {
   register: (userData) => apiRequest('/auth/register', {
     method: 'POST',
@@ -94,7 +122,7 @@ export const authAPI = {
   }),
 };
 
-// Products API
+// Products API (No changes needed)
 export const productsAPI = {
   getProducts: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
@@ -113,7 +141,7 @@ export const productsAPI = {
   getCategories: () => apiRequest('/products/categories/list'),
 };
 
-// Cart API
+// Cart API (No changes needed)
 export const cartAPI = {
   getCart: () => apiRequest('/cart'),
 
@@ -140,7 +168,7 @@ export const cartAPI = {
   validateCart: () => apiRequest('/cart/validate'),
 };
 
-// Orders API
+// Orders API (No changes needed)
 export const ordersAPI = {
   createOrder: (orderData) => apiRequest('/orders', {
     method: 'POST',
@@ -159,7 +187,7 @@ export const ordersAPI = {
   }),
 };
 
-// Reviews API
+// Reviews API (No changes needed)
 export const reviewsAPI = {
   addReview: (productId, reviewData) => apiRequest(`/reviews/${productId}`, {
     method: 'POST',
@@ -188,7 +216,7 @@ export const reviewsAPI = {
   }),
 };
 
-// Support API
+// Support API (No changes needed)
 export const supportAPI = {
   createTicket: (ticketData) => apiRequest('/support/tickets', {
     method: 'POST',
@@ -205,11 +233,10 @@ export const supportAPI = {
   searchKnowledgeBase: (query) => apiRequest(`/support/knowledge-base/search?q=${encodeURIComponent(query)}`),
 };
 
-// Utility functions
-// Utility functions
+// Utility functions (No changes needed)
 export { setAuthToken as setToken, removeAuthToken as removeToken, getAuthToken as getToken };
 
-// Legacy functions for backward compatibility
+// Legacy functions for backward compatibility (No changes needed)
 export async function getProducts() {
   try {
     const data = await productsAPI.getProducts();
