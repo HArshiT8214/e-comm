@@ -1,20 +1,36 @@
 const { pool } = require('../config/database');
 
+// NOTE: Ensure the executeQuery helper is defined globally or imported correctly
+const executeQuery = async (sql, params = []) => {
+    // This helper must convert '?' to '$1, $2, ...' and use pool.query
+    const buildPostgresQuery = (s, p) => {
+        let index = 1;
+        const pgSql = s.replace(/\?/g, () => `$${index++}`);
+        return [pgSql, p];
+    };
+    
+    const [query, pgParams] = buildPostgresQuery(sql, params);
+    const result = await pool.query(query, pgParams);
+    return result.rows;
+};
+
+
 class SupportService {
   // Create support ticket
   async createTicket(userId, ticketData) {
     const { subject, description } = ticketData;
     
     try {
-      const [result] = await pool.execute(
-        'INSERT INTO support_tickets (user_id, subject, description, status) VALUES (?, ?, ?, ?)',
+      // POSTGRESQL CHANGE: Use RETURNING ticket_id
+      const result = await executeQuery(
+        'INSERT INTO support_tickets (user_id, subject, description, status) VALUES (?, ?, ?, ?) RETURNING ticket_id',
         [userId, subject, description, 'open']
       );
 
       return {
         success: true,
         message: 'Support ticket created successfully',
-        data: { ticket_id: result.insertId }
+        data: { ticket_id: result[0].ticket_id }
       };
     } catch (error) {
       throw new Error(`Failed to create support ticket: ${error.message}`);
@@ -34,23 +50,19 @@ class SupportService {
         whereClause += ' AND status = ?';
         queryParams.push(status);
       }
-
+      
       // Get total count
-      const [countResult] = await pool.execute(
+      const countResult = await executeQuery(
         `SELECT COUNT(*) as total FROM support_tickets ${whereClause}`,
         queryParams
       );
-      const total = countResult[0].total;
+      const total = parseInt(countResult[0].total);
 
       // Get tickets
-      const [tickets] = await pool.execute(
+      // POSTGRESQL CHANGE: Limit/Offset handled by executeQuery helper's positional parameters
+      const tickets = await executeQuery(
         `SELECT 
-          ticket_id,
-          subject,
-          description,
-          status,
-          created_at,
-          updated_at
+          ticket_id, subject, description, status, created_at, updated_at
         FROM support_tickets
         ${whereClause}
         ORDER BY created_at DESC
@@ -78,17 +90,10 @@ class SupportService {
   // Get ticket by ID
   async getTicketById(ticketId, userId) {
     try {
-      const [tickets] = await pool.execute(
+      const tickets = await executeQuery(
         `SELECT 
-          t.ticket_id,
-          t.subject,
-          t.description,
-          t.status,
-          t.created_at,
-          t.updated_at,
-          u.first_name,
-          u.last_name,
-          u.email
+          t.ticket_id, t.subject, t.description, t.status, t.created_at, t.updated_at,
+          u.first_name, u.last_name, u.email
         FROM support_tickets t
         JOIN users u ON t.user_id = u.user_id
         WHERE t.ticket_id = ? AND t.user_id = ?`,
@@ -116,12 +121,13 @@ class SupportService {
         throw new Error('Invalid ticket status');
       }
 
-      const [result] = await pool.execute(
+      // POSTGRESQL CHANGE: updated_at is CURRENT_TIMESTAMP; check rowCount
+      const result = await executeQuery(
         'UPDATE support_tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE ticket_id = ?',
         [status, ticketId]
       );
 
-      if (result.affectedRows === 0) {
+      if (result.rowCount === 0) {
         throw new Error('Ticket not found');
       }
 
@@ -140,7 +146,7 @@ class SupportService {
     const offset = (page - 1) * limit;
 
     try {
-      let whereClause = 'WHERE 1=1';
+      let whereClause = 'WHERE TRUE'; // PostgreSQL boolean
       let queryParams = [];
 
       if (status) {
@@ -149,33 +155,27 @@ class SupportService {
       }
 
       if (search) {
-        whereClause += ' AND (t.subject LIKE ? OR t.description LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ?)';
+        // POSTGRESQL CHANGE: Use ILIKE for case-insensitive search
+        whereClause += ' AND (t.subject ILIKE ? OR t.description ILIKE ? OR u.first_name ILIKE ? OR u.last_name ILIKE ?)';
         const searchTerm = `%${search}%`;
         queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
       }
-
+      
       // Get total count
-      const [countResult] = await pool.execute(
+      const countResult = await executeQuery(
         `SELECT COUNT(*) as total 
          FROM support_tickets t
          JOIN users u ON t.user_id = u.user_id
          ${whereClause}`,
         queryParams
       );
-      const total = countResult[0].total;
+      const total = parseInt(countResult[0].total);
 
       // Get tickets
-      const [tickets] = await pool.execute(
+      const tickets = await executeQuery(
         `SELECT 
-          t.ticket_id,
-          t.subject,
-          t.description,
-          t.status,
-          t.created_at,
-          t.updated_at,
-          u.first_name,
-          u.last_name,
-          u.email
+          t.ticket_id, t.subject, t.description, t.status, t.created_at, t.updated_at,
+          u.first_name, u.last_name, u.email
         FROM support_tickets t
         JOIN users u ON t.user_id = u.user_id
         ${whereClause}
@@ -204,13 +204,14 @@ class SupportService {
   // Get ticket statistics (admin only)
   async getTicketStatistics() {
     try {
-      const [stats] = await pool.execute(
+      // POSTGRESQL CHANGE: SUM(CASE) and type casting
+      const stats = await executeQuery(
         `SELECT 
-          COUNT(*) as total_tickets,
-          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_tickets,
-          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_tickets,
-          SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved_tickets,
-          SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed_tickets
+          COUNT(*)::INT as total_tickets,
+          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)::INT as open_tickets,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END)::INT as in_progress_tickets,
+          SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END)::INT as resolved_tickets,
+          SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END)::INT as closed_tickets
         FROM support_tickets`
       );
 
@@ -225,8 +226,7 @@ class SupportService {
 
   // Search knowledge base (placeholder for future implementation)
   async searchKnowledgeBase(query) {
-    // This would integrate with a knowledge base system
-    // For now, return a placeholder response
+    // This function is database-agnostic
     return {
       success: true,
       data: {

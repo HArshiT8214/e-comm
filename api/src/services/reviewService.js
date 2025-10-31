@@ -1,13 +1,28 @@
 const { pool } = require('../config/database');
 
+// NOTE: Ensure the executeQuery helper is defined globally or imported correctly
+const executeQuery = async (sql, params = []) => {
+    // This helper must convert '?' to '$1, $2, ...' and use pool.query
+    const buildPostgresQuery = (s, p) => {
+        let index = 1;
+        const pgSql = s.replace(/\?/g, () => `$${index++}`);
+        return [pgSql, p];
+    };
+    
+    const [query, pgParams] = buildPostgresQuery(sql, params);
+    const result = await pool.query(query, pgParams);
+    return result.rows;
+};
+
 class ReviewService {
   // Add review
   async addReview(userId, productId, reviewData) {
     const { rating, comment } = reviewData;
     
     try {
-      // Check if user has purchased this product
-      const [purchases] = await pool.execute(
+      // 1. Check if user has purchased this product
+      // POSTGRESQL CHANGE: Use executeQuery
+      const purchases = await executeQuery(
         `SELECT 1 FROM order_items oi
          JOIN orders o ON oi.order_id = o.order_id
          WHERE o.user_id = ? AND oi.product_id = ? AND o.status = 'delivered'`,
@@ -18,8 +33,8 @@ class ReviewService {
         throw new Error('You must purchase this product before reviewing it');
       }
 
-      // Check if user already reviewed this product
-      const [existingReviews] = await pool.execute(
+      // 2. Check if user already reviewed this product
+      const existingReviews = await executeQuery(
         'SELECT review_id FROM reviews WHERE user_id = ? AND product_id = ?',
         [userId, productId]
       );
@@ -28,16 +43,17 @@ class ReviewService {
         throw new Error('You have already reviewed this product');
       }
 
-      // Add review
-      const [result] = await pool.execute(
-        'INSERT INTO reviews (user_id, product_id, rating, comment) VALUES (?, ?, ?, ?)',
+      // 3. Add review
+      // POSTGRESQL CHANGE: Use RETURNING review_id
+      const result = await executeQuery(
+        'INSERT INTO reviews (user_id, product_id, rating, comment) VALUES (?, ?, ?, ?) RETURNING review_id',
         [userId, productId, rating, comment || null]
       );
 
       return {
         success: true,
         message: 'Review added successfully',
-        data: { review_id: result.insertId }
+        data: { review_id: result[0].review_id }
       };
     } catch (error) {
       throw new Error(`Failed to add review: ${error.message}`);
@@ -59,21 +75,16 @@ class ReviewService {
       }
 
       // Get total count
-      const [countResult] = await pool.execute(
+      const countResult = await executeQuery(
         `SELECT COUNT(*) as total FROM reviews r ${whereClause}`,
         queryParams
       );
-      const total = countResult[0].total;
+      const total = parseInt(countResult[0].total);
 
       // Get reviews
-      const [reviews] = await pool.execute(
+      const reviews = await executeQuery(
         `SELECT 
-          r.review_id,
-          r.rating,
-          r.comment,
-          r.created_at,
-          u.first_name,
-          u.last_name
+          r.review_id, r.rating, r.comment, r.created_at, u.first_name, u.last_name
         FROM reviews r
         JOIN users u ON r.user_id = u.user_id
         ${whereClause}
@@ -83,15 +94,16 @@ class ReviewService {
       );
 
       // Get rating summary
-      const [ratingSummary] = await pool.execute(
+      // POSTGRESQL CHANGE: SUM(CASE) and AVG require casting to number
+      const ratingSummary = await executeQuery(
         `SELECT 
-          AVG(rating) as average_rating,
-          COUNT(*) as total_reviews,
-          SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END) as five_star,
-          SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END) as four_star,
-          SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END) as three_star,
-          SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) as two_star,
-          SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as one_star
+          AVG(rating)::NUMERIC(10,2) as average_rating,
+          COUNT(*)::INT as total_reviews,
+          SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END)::INT as five_star,
+          SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END)::INT as four_star,
+          SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END)::INT as three_star,
+          SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END)::INT as two_star,
+          SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END)::INT as one_star
         FROM reviews WHERE product_id = ?`,
         [productId]
       );
@@ -121,22 +133,17 @@ class ReviewService {
 
     try {
       // Get total count
-      const [countResult] = await pool.execute(
+      const countResult = await executeQuery(
         'SELECT COUNT(*) as total FROM reviews WHERE user_id = ?',
         [userId]
       );
-      const total = countResult[0].total;
+      const total = parseInt(countResult[0].total);
 
       // Get reviews
-      const [reviews] = await pool.execute(
+      const reviews = await executeQuery(
         `SELECT 
-          r.review_id,
-          r.rating,
-          r.comment,
-          r.created_at,
-          p.name as product_name,
-          p.image_url,
-          p.sku
+          r.review_id, r.rating, r.comment, r.created_at,
+          p.name as product_name, p.image_url, p.sku
         FROM reviews r
         JOIN products p ON r.product_id = p.product_id
         WHERE r.user_id = ?
@@ -168,7 +175,7 @@ class ReviewService {
     
     try {
       // Verify review belongs to user
-      const [reviews] = await pool.execute(
+      const reviews = await executeQuery(
         'SELECT review_id FROM reviews WHERE review_id = ? AND user_id = ?',
         [reviewId, userId]
       );
@@ -177,15 +184,17 @@ class ReviewService {
         throw new Error('Review not found');
       }
 
-      await pool.execute(
+      // POSTGRESQL CHANGE: updated_at is CURRENT_TIMESTAMP; check rowCount
+      const result = await executeQuery(
         'UPDATE reviews SET rating = ?, comment = ?, created_at = CURRENT_TIMESTAMP WHERE review_id = ?',
         [rating, comment, reviewId]
       );
 
-      return {
-        success: true,
-        message: 'Review updated successfully'
-      };
+      if (result.rowCount === 0) {
+        throw new Error('Review not found');
+      }
+
+      return { success: true, message: 'Review updated successfully' };
     } catch (error) {
       throw new Error(`Failed to update review: ${error.message}`);
     }
@@ -194,19 +203,17 @@ class ReviewService {
   // Delete review
   async deleteReview(userId, reviewId) {
     try {
-      const [result] = await pool.execute(
+      // POSTGRESQL CHANGE: check rowCount
+      const result = await executeQuery(
         'DELETE FROM reviews WHERE review_id = ? AND user_id = ?',
         [reviewId, userId]
       );
 
-      if (result.affectedRows === 0) {
+      if (result.rowCount === 0) {
         throw new Error('Review not found');
       }
 
-      return {
-        success: true,
-        message: 'Review deleted successfully'
-      };
+      return { success: true, message: 'Review deleted successfully' };
     } catch (error) {
       throw new Error(`Failed to delete review: ${error.message}`);
     }
@@ -215,23 +222,21 @@ class ReviewService {
   // Get review statistics for product
   async getProductReviewStats(productId) {
     try {
-      const [stats] = await pool.execute(
+      // POSTGRESQL CHANGE: Use casting
+      const stats = await executeQuery(
         `SELECT 
-          AVG(rating) as average_rating,
-          COUNT(*) as total_reviews,
-          SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END) as five_star,
-          SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END) as four_star,
-          SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END) as three_star,
-          SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) as two_star,
-          SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as one_star
+          AVG(rating)::NUMERIC(10,2) as average_rating,
+          COUNT(*)::INT as total_reviews,
+          SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END)::INT as five_star,
+          SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END)::INT as four_star,
+          SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END)::INT as three_star,
+          SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END)::INT as two_star,
+          SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END)::INT as one_star
         FROM reviews WHERE product_id = ?`,
         [productId]
       );
 
-      return {
-        success: true,
-        data: stats[0]
-      };
+      return { success: true, data: stats[0] };
     } catch (error) {
       throw new Error(`Failed to get review statistics: ${error.message}`);
     }
@@ -240,14 +245,10 @@ class ReviewService {
   // Get recent reviews (admin)
   async getRecentReviews(limit = 10) {
     try {
-      const [reviews] = await pool.execute(
+      const reviews = await executeQuery(
         `SELECT 
-          r.review_id,
-          r.rating,
-          r.comment,
-          r.created_at,
-          u.first_name,
-          u.last_name,
+          r.review_id, r.rating, r.comment, r.created_at,
+          u.first_name, u.last_name,
           p.name as product_name
         FROM reviews r
         JOIN users u ON r.user_id = u.user_id
@@ -257,10 +258,7 @@ class ReviewService {
         [limit]
       );
 
-      return {
-        success: true,
-        data: reviews
-      };
+      return { success: true, data: reviews };
     } catch (error) {
       throw new Error(`Failed to get recent reviews: ${error.message}`);
     }

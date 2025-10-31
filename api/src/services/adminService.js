@@ -8,6 +8,7 @@ class AdminService {
   static buildPostgresQuery(sql, params) {
     if (!params) return [sql, []];
     let index = 1;
+    // CRITICAL: Replace all '?' with $1, $2, etc., using the count of parameters
     const newSql = sql.replace(/\?/g, () => `$${index++}`);
     return [newSql, params];
   }
@@ -21,9 +22,7 @@ class AdminService {
   // Dashboard Statistics
   async getDashboardStats() {
     try {
-      // NOTE: PostgreSQL requires subqueries to return the same number of columns, 
-      // and it doesn't support the non-standard MySQL subquery syntax. 
-      // We run these as individual queries and combine the results.
+      // NOTE: Queries are already structured for PostgreSQL's compound select/subqueries.
       
       const statsQuery = `
         SELECT 
@@ -71,21 +70,22 @@ class AdminService {
   async getPrinters(page = 1, limit = 10, filters = {}) {
     try {
       const offset = (page - 1) * limit;
-      let whereClause = 'WHERE TRUE'; // PostgreSQL boolean
+      let whereClause = 'WHERE TRUE';
       const queryParams = [];
-      let paramCount = 1;
+      
+      // Note: The logic for dynamic $1, $2, etc., is complex. We will use the executeQuery helper's method 
+      // of building the query dynamically by using placeholder '?' throughout.
 
       if (filters.search) {
-        whereClause += ` AND (p.name ILIKE $${paramCount} OR p.sku ILIKE $${paramCount + 1} OR p.description ILIKE $${paramCount + 2})`;
+        // Use ILIKE and '?' placeholders for executeQuery helper
+        whereClause += ` AND (p.name ILIKE ? OR p.sku ILIKE ? OR p.description ILIKE ?)`;
         const searchTerm = `%${filters.search}%`;
         queryParams.push(searchTerm, searchTerm, searchTerm);
-        paramCount += 3;
       }
 
       if (filters.category) {
-        whereClause += ` AND p.category_id = $${paramCount}`;
+        whereClause += ` AND p.category_id = ?`;
         queryParams.push(filters.category);
-        paramCount += 1;
       }
 
       // Get total count
@@ -107,7 +107,7 @@ class AdminService {
         JOIN categories c ON p.category_id = c.category_id
         ${whereClause}
         ORDER BY p.created_at DESC
-        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+        LIMIT ? OFFSET ?
       `;
       
       queryParams.push(limit, offset);
@@ -136,7 +136,7 @@ class AdminService {
           p.brand, p.price, p.stock_quantity, p.sku, p.image_url, p.created_at, p.updated_at
         FROM products p
         JOIN categories c ON p.category_id = c.category_id
-        WHERE p.product_id = $1
+        WHERE p.product_id = ?
       `;
       const products = await this.executeQuery(productsQuery, [productId]);
 
@@ -148,7 +148,7 @@ class AdminService {
       const images = await this.executeQuery(`
         SELECT image_id, url, alt_text, display_order
         FROM product_images
-        WHERE product_id = $1
+        WHERE product_id = ?
         ORDER BY display_order ASC
       `, [productId]);
 
@@ -169,7 +169,7 @@ class AdminService {
 
       // Check if SKU already exists
       const existingProduct = await client.query(
-        'SELECT product_id FROM products WHERE sku = $1',
+        'SELECT product_id FROM products WHERE sku = $1', // Use explicit $1
         [printerData.sku]
       );
 
@@ -200,7 +200,7 @@ class AdminService {
         await client.query(`
           INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id, created_at)
           VALUES ($1, $2, 'restock', 'initial', $3, CURRENT_TIMESTAMP)
-        `, [productId, printerData.stock_quantity, productId]);
+        `, [productId, printerData.stock_quantity, productId]); // Use explicit $1, $2, $3
       }
 
       await client.query('COMMIT'); // Commit transaction
@@ -243,7 +243,7 @@ class AdminService {
         }
       }
 
-      // Build update query dynamically
+      // Build update query dynamically (Keep this logic for dynamic update, using $1, $2...)
       const updateFields = [];
       const updateValues = [];
 
@@ -267,6 +267,7 @@ class AdminService {
         SET ${updateFields.join(', ')}
         WHERE product_id = $${updateValues.length}
       `;
+      // NOTE: This client.query uses explicit $ placeholders and must be retained as is.
       await client.query(finalUpdateQuery, updateValues);
 
       // Handle stock changes
@@ -279,7 +280,7 @@ class AdminService {
           await client.query(`
             INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id, created_at)
             VALUES ($1, $2, 'adjustment', 'admin_update', $3, CURRENT_TIMESTAMP)
-          `, [productId, delta, productId]);
+          `, [productId, delta, productId]); // Use explicit $1, $2, $3
         }
       }
 
@@ -362,6 +363,7 @@ class AdminService {
   // Category Management (Create Category)
   async createCategory(categoryData) {
     try {
+      // NOTE: Using '?' placeholder for executeQuery helper
       const insertResult = await this.executeQuery(`
         INSERT INTO categories (name, parent_id)
         VALUES (?, ?)
@@ -377,7 +379,8 @@ class AdminService {
         LEFT JOIN categories p ON c.parent_id = p.category_id
         WHERE c.category_id = $1
       `;
-      const newCategory = await pool.query(newCategoryQuery, [categoryId]);
+      // NOTE: This uses pool.query directly and is fine for simple lookup.
+      const newCategory = await pool.query(newCategoryQuery, [categoryId]); 
 
       return newCategory.rows[0];
     } catch (error) {

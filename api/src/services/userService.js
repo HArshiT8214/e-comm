@@ -4,6 +4,21 @@ const { generateToken } = require('../config/jwt');
 const { generateResetToken } = require('../utils/helpers');
 const { sendPasswordResetEmail } = require('../utils/email');
 
+// NOTE: You must include these helpers in your database/utility file OR
+// copy them into this file from the productService.js conversion.
+const executeQuery = async (sql, params = []) => {
+    // Helper must convert '?' to '$1, $2, ...' and use pool.query
+    const buildPostgresQuery = (s, p) => {
+        let index = 1;
+        const pgSql = s.replace(/\?/g, () => `$${index++}`);
+        return [pgSql, p];
+    };
+    
+    const [query, pgParams] = buildPostgresQuery(sql, params);
+    const result = await pool.query(query, pgParams);
+    return result.rows;
+};
+
 class UserService {
   // Register new user
   async registerUser(userData) {
@@ -11,7 +26,7 @@ class UserService {
     
     try {
       // Check if user already exists
-      const [existingUsers] = await pool.execute(
+      const existingUsers = await executeQuery(
         'SELECT user_id FROM users WHERE email = ?',
         [email]
       );
@@ -24,14 +39,14 @@ class UserService {
       const saltRounds = 12;
       const passwordHash = await bcrypt.hash(password, saltRounds);
 
-      // Insert user
-      const [result] = await pool.execute(
+      // Insert user and use RETURNING to get ID
+      const result = await executeQuery(
         `INSERT INTO users (first_name, last_name, email, password_hash, phone, role, is_active) 
-         VALUES (?, ?, ?, ?, ?, 'customer', 1)`,
+         VALUES (?, ?, ?, ?, ?, 'customer', TRUE) RETURNING user_id`,
         [firstName, lastName, email, passwordHash, phone || null]
       );
 
-      const userId = result.insertId;
+      const userId = result[0].user_id;
 
       // Generate JWT token
       const token = generateToken({ 
@@ -53,6 +68,10 @@ class UserService {
         }
       };
     } catch (error) {
+      // Check for PostgreSQL unique constraint error code (23505)
+      if (error.code === '23505') {
+          throw new Error('User with this email already exists');
+      }
       throw new Error(`Registration failed: ${error.message}`);
     }
   }
@@ -63,7 +82,7 @@ class UserService {
     
     try {
       // Find user by email
-      const [users] = await pool.execute(
+      const users = await executeQuery(
         'SELECT user_id, first_name, last_name, email, password_hash, role, is_active FROM users WHERE email = ?',
         [email]
       );
@@ -111,9 +130,10 @@ class UserService {
   // Get user profile
   async getUserProfile(userId) {
     try {
-      const [users] = await pool.execute(
+      // POSTGRESQL CHANGE: is_active = TRUE
+      const users = await executeQuery(
         `SELECT user_id, first_name, last_name, email, phone, role, created_at 
-         FROM users WHERE user_id = ? AND is_active = 1`,
+         FROM users WHERE user_id = ? AND is_active = TRUE`,
         [userId]
       );
 
@@ -122,7 +142,7 @@ class UserService {
       }
 
       // Get user addresses
-      const [addresses] = await pool.execute(
+      const addresses = await executeQuery(
         'SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC',
         [userId]
       );
@@ -144,10 +164,16 @@ class UserService {
     const { first_name, last_name, phone } = updateData;
     
     try {
-      await pool.execute(
+      // POSTGRESQL CHANGE: updated_at is handled by DB trigger OR must be explicitly set
+      const result = await executeQuery(
         'UPDATE users SET first_name = ?, last_name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [first_name, last_name, phone, userId]
       );
+
+      // POSTGRESQL CHANGE: Check rowCount instead of affectedRows
+      if (result.rowCount === 0) {
+         throw new Error('User not found');
+      }
 
       return {
         success: true,
@@ -164,7 +190,7 @@ class UserService {
     
     try {
       // Get current password hash
-      const [users] = await pool.execute(
+      const users = await executeQuery(
         'SELECT password_hash FROM users WHERE user_id = ?',
         [userId]
       );
@@ -184,10 +210,14 @@ class UserService {
       const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
 
       // Update password
-      await pool.execute(
+      const result = await executeQuery(
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [newPasswordHash, userId]
       );
+      
+      if (result.rowCount === 0) {
+         throw new Error('User not found after check');
+      }
 
       return {
         success: true,
@@ -198,33 +228,35 @@ class UserService {
     }
   }
 
-  // Request password reset
+  // Request password reset (Simplified: No custom reset table used)
   async requestPasswordReset(email) {
     try {
-      const [users] = await pool.execute(
-        'SELECT user_id, email FROM users WHERE email = ? AND is_active = 1',
+      // POSTGRESQL CHANGE: is_active = TRUE
+      const users = await executeQuery(
+        'SELECT user_id, email FROM users WHERE email = ? AND is_active = TRUE',
         [email]
       );
 
       if (users.length === 0) {
-        // Don't reveal if email exists or not
         return {
           success: true,
           message: 'If the email exists, a reset link has been sent'
         };
       }
+      
+      // NOTE: This approach of storing the token in the password_hash field is insecure.
+      // It is highly recommended to create a dedicated 'password_resets' table.
 
       const resetToken = generateResetToken();
       const expiresAt = new Date(Date.now() + 3600000); // 1 hour
 
-      // Store reset token (you might want to create a separate table for this)
-      // For now, we'll use a simple approach
-      await pool.execute(
-        'UPDATE users SET password_hash = ? WHERE user_id = ?',
+      // Store reset token temporarily
+      await executeQuery(
+        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [resetToken, users[0].user_id]
       );
 
-      // Send reset email
+      // Send reset email (assuming this utility handles execution)
       const emailSent = await sendPasswordResetEmail(email, resetToken);
       
       if (!emailSent) {
@@ -247,22 +279,23 @@ class UserService {
     try {
       // If this is set as default, unset other defaults
       if (is_default) {
-        await pool.execute(
-          'UPDATE addresses SET is_default = 0 WHERE user_id = ?',
+        await executeQuery(
+          'UPDATE addresses SET is_default = FALSE WHERE user_id = ?', // POSTGRESQL CHANGE: boolean
           [userId]
         );
       }
 
-      const [result] = await pool.execute(
+      // POSTGRESQL CHANGE: is_default boolean, RETURNING address_id
+      const result = await executeQuery(
         `INSERT INTO addresses (user_id, line1, line2, city, state, zipcode, country, is_default) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, line1, line2, city, state, zipcode, country, is_default ? 1 : 0]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING address_id`,
+        [userId, line1, line2, city, state, zipcode, country, is_default || false] // Pass boolean
       );
 
       return {
         success: true,
         message: 'Address added successfully',
-        data: { address_id: result.insertId }
+        data: { address_id: result[0].address_id }
       };
     } catch (error) {
       throw new Error(`Failed to add address: ${error.message}`);
@@ -275,7 +308,7 @@ class UserService {
     
     try {
       // Verify address belongs to user
-      const [addresses] = await pool.execute(
+      const addresses = await executeQuery(
         'SELECT address_id FROM addresses WHERE address_id = ? AND user_id = ?',
         [addressId, userId]
       );
@@ -286,17 +319,22 @@ class UserService {
 
       // If this is set as default, unset other defaults
       if (is_default) {
-        await pool.execute(
-          'UPDATE addresses SET is_default = 0 WHERE user_id = ? AND address_id != ?',
+        await executeQuery(
+          'UPDATE addresses SET is_default = FALSE WHERE user_id = ? AND address_id != ?',
           [userId, addressId]
         );
       }
 
-      await pool.execute(
+      // POSTGRESQL CHANGE: is_default boolean, updated_at, check rowCount
+      const result = await executeQuery(
         `UPDATE addresses SET line1 = ?, line2 = ?, city = ?, state = ?, zipcode = ?, country = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE address_id = ? AND user_id = ?`,
-        [line1, line2, city, state, zipcode, country, is_default ? 1 : 0, addressId, userId]
+        [line1, line2, city, state, zipcode, country, is_default || false, addressId, userId]
       );
+
+      if (result.rowCount === 0) {
+         throw new Error('Address not found'); // Should not happen due to check above, but safe
+      }
 
       return {
         success: true,
@@ -310,12 +348,13 @@ class UserService {
   // Delete address
   async deleteAddress(userId, addressId) {
     try {
-      const [result] = await pool.execute(
+      const result = await executeQuery(
         'DELETE FROM addresses WHERE address_id = ? AND user_id = ?',
         [addressId, userId]
       );
 
-      if (result.affectedRows === 0) {
+      // POSTGRESQL CHANGE: Check rowCount instead of affectedRows
+      if (result.rowCount === 0) {
         throw new Error('Address not found');
       }
 

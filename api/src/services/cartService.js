@@ -9,6 +9,7 @@ class CartService {
   static buildPostgresQuery(sql, params) {
     if (!params) return [sql, []];
     let index = 1;
+    // CRITICAL: Replace all '?' with $1, $2, etc., using the count of parameters
     const newSql = sql.replace(/\?/g, () => `$${index++}`);
     return [newSql, params];
   }
@@ -26,7 +27,7 @@ class CartService {
   async getOrCreateCart(userId) {
     try {
       // Check if cart exists
-      let carts = await this.executeQuery(
+      const carts = await this.executeQuery(
         'SELECT cart_id FROM carts WHERE user_id = ?',
         [userId]
       );
@@ -82,7 +83,7 @@ class CartService {
     }
   }
 
-  // Add item to cart
+  // Add item to cart (Uses client.query with explicit $1, $2, etc., which is correct)
   async addToCart(userId, productId, quantity = 1) {
     const client = await pool.connect();
     try {
@@ -121,7 +122,7 @@ class CartService {
         }
 
         await client.query(
-          'UPDATE cart_items SET quantity = $1, unit_price = $2 WHERE cart_item_id = $3',
+          'UPDATE cart_items SET quantity = $1, unit_price = $2, updated_at = CURRENT_TIMESTAMP WHERE cart_item_id = $3',
           [newQuantity, product.price, existingItem.cart_item_id]
         );
       } else {
@@ -142,7 +143,7 @@ class CartService {
     }
   }
 
-  // Update cart item quantity
+  // Update cart item quantity (Uses client.query with explicit $1, $2, etc., which is correct)
   async updateCartItem(userId, cartItemId, quantity) {
     const client = await pool.connect();
     try {
@@ -186,7 +187,7 @@ class CartService {
     }
   }
 
-  // Remove item from cart
+  // Remove item from cart (Uses pool.query with explicit $1, $2, etc., which is correct)
   async removeFromCart(userId, cartItemId) {
     try {
       // Verify cart item belongs to user and delete
@@ -208,7 +209,7 @@ class CartService {
     }
   }
 
-  // Clear cart
+  // Clear cart (Uses pool.query with explicit $1, which is correct)
   async clearCart(userId) {
     try {
       const cartId = await this.getOrCreateCart(userId);
@@ -224,7 +225,7 @@ class CartService {
     }
   }
 
-  // Get cart count
+  // Get cart count (Uses pool.query with explicit $1, which is correct)
   async getCartCount(userId) {
     try {
       const cartId = await this.getOrCreateCart(userId);
@@ -234,14 +235,14 @@ class CartService {
         [cartId]
       );
 
-      // COALESCE ensures total_items is a number, even if cart is empty
+      // COALESCE ensures total_items is a string/number that needs parsing
       return { success: true, data: { count: parseInt(result.rows[0].total_items) } };
     } catch (error) {
       throw new Error(`Failed to get cart count: ${error.message}`);
     }
   }
 
-  // Validate cart before checkout
+  // Validate cart before checkout (Uses executeQuery with '?' placeholders, which is correct)
   async validateCart(userId) {
     try {
       const cartData = await this.getCartItems(userId);
