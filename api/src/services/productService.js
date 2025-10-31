@@ -45,8 +45,8 @@ class ProductService {
     const { offset, limit: queryLimit } = getPagination(page, limit);
 
     try {
-      // ✅ FINAL FIX: Include products where is_active is NULL or TRUE
-      let whereConditions = ['(p.is_active IS NULL OR p.is_active = TRUE)'];
+      // ✅ FIX: Removed 'is_active' from WHERE clause
+      let whereConditions = []; 
       let queryParams = [];
 
       // --- Filters ---
@@ -154,6 +154,7 @@ class ProductService {
 
   async getProductById(productId) {
     try {
+      // ✅ FIX: Removed 'is_active' from WHERE clause
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
@@ -162,7 +163,7 @@ class ProductService {
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.category_id
         LEFT JOIN reviews r ON p.product_id = r.product_id
-        WHERE p.product_id = ? AND (p.is_active IS NULL OR p.is_active = TRUE)
+        WHERE p.product_id = ?
         GROUP BY 
           p.product_id, c.category_id, c.name, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
@@ -177,10 +178,11 @@ class ProductService {
       const images = await this.executeQuery('SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order', [product.product_id]);
       product.images = images;
       
+      // ✅ FIX: Removed 'is_active' from WHERE clause
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
-        WHERE category_id = ? AND product_id != ? AND (is_active IS NULL OR is_active = TRUE)
+        WHERE category_id = ? AND product_id != ?
         LIMIT 4
       `;
       const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_id, productId]);
@@ -194,6 +196,7 @@ class ProductService {
 
   async getCategories() {
     try {
+      // ✅ FIX: Removed 'is_active' from JOIN condition
       const categoriesQuery = `
         SELECT 
           c.category_id,
@@ -201,7 +204,7 @@ class ProductService {
           c.parent_id,
           COUNT(p.product_id)::INT as product_count
         FROM categories c
-        LEFT JOIN products p ON c.category_id = p.category_id AND (p.is_active IS NULL OR p.is_active = TRUE)
+        LEFT JOIN products p ON c.category_id = p.category_id
         GROUP BY c.category_id
         ORDER BY c.name
       `;
@@ -226,9 +229,10 @@ class ProductService {
         throw new Error('Product with this SKU already exists');
       }
 
+      // ✅ FIX: Removed 'is_active' from INSERT statement
       const insertQuery = `
-        INSERT INTO products (name, description, category_id, price, stock_quantity, sku, brand, image_url, is_active) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+        INSERT INTO products (name, description, category_id, price, stock_quantity, sku, brand, image_url) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING product_id
       `;
       const result = await this.executeQuery(insertQuery, [name, description, category_id, price, stock_quantity, sku, brand, image_url]);
@@ -278,9 +282,9 @@ class ProductService {
 
   async deleteProduct(productId) {
     try {
-      // Soft delete by setting is_active to FALSE
+      // ✅ FIX: Changed from soft delete (is_active) to a HARD DELETE
       const result = await this.executeQuery(
-        'UPDATE products SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?',
+        'DELETE FROM products WHERE product_id = ?',
         [productId]
       );
 
@@ -292,7 +296,8 @@ class ProductService {
         success: true,
         message: 'Product deleted successfully'
       };
-    } catch (error) {
+    } catch (error)
+ {
       throw new Error(`Failed to delete product: ${error.message}`);
     }
   }
@@ -335,6 +340,7 @@ class ProductService {
 
   async getFeaturedProducts(limit = 8) {
     try {
+      // ✅ FIX: Removed 'is_active' from WHERE clause
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.price, p.image_url, p.sku,
@@ -342,7 +348,7 @@ class ProductService {
           COUNT(r.review_id) as review_count
         FROM products p
         LEFT JOIN reviews r ON p.product_id = r.product_id
-        WHERE (p.is_active IS NULL OR p.is_active = TRUE) AND p.stock_quantity > 0
+        WHERE p.stock_quantity > 0
         GROUP BY p.product_id
         ORDER BY average_rating DESC, p.created_at DESC
         LIMIT ?
