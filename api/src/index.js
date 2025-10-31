@@ -2,90 +2,116 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
 
-// We no longer need the 'path' module
-// const path = require('path'); 
+// ✅ --- DEBUG LOG 1 ---
+console.log('SERVER-SIDE: Function initializing... Loading dependencies.');
 
-// const { testConnection } = require('./config/database'); // Commented out to prevent startup crashes
-const errorHandler = require('./middleware/errorHandler');
+try {
+  // ✅ --- DEBUG LOG 2 ---
+  console.log('SERVER-SIDE: Loading dotenv...');
+  require('dotenv').config();
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const cartRoutes = require('./routes/cart');
-const orderRoutes = require('./routes/orders');
-const reviewRoutes = require('./routes/reviews');
-const supportRoutes = require('./routes/support');
-const adminRoutes = require('./routes/admin');
+  // ✅ --- DEBUG LOG 3 ---
+  console.log('SERVER-SIDE: Loading errorHandler...');
+  const errorHandler = require('./middleware/errorHandler');
 
-const app = express();
-const PORT = process.env.PORT || 3001; 
+  // ✅ --- DEBUG LOG 4 ---
+  console.log('SERVER-SIDE: Loading auth routes...');
+  const authRoutes = require('./routes/auth');
 
-// Security middleware
-app.use(helmet());
+  // ✅ --- DEBUG LOG 5 ---
+  console.log('SERVER-SIDE: Loading product routes...');
+  const productRoutes = require('./routes/products');
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
+  // ✅ --- DEBUG LOG 6 ---
+  console.log('SERVER-SIDE: Loading cart routes...');
+  const cartRoutes = require('./routes/cart');
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-  message: {
-    success: false,
-    message: 'Too many requests from this IP, please try again later.'
-  }
-});
-app.use(limiter);
+  // ✅ --- DEBUG LOG 7 ---
+  console.log('SERVER-SIDE: Loading order routes...');
+  const orderRoutes = require('./routes/orders');
 
-// ❌ REMOVED: app.use(express.static('public'));
-// Vercel's vercel.json handles static file serving, not this file.
+  // ✅ --- DEBUG LOG 8 ---
+  console.log('SERVER-SIDE: Loading review routes...');
+  const reviewRoutes = require('./routes/reviews');
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  // ✅ --- DEBUG LOG 9 ---
+  console.log('SERVER-SIDE: Loading support routes...');
+  const supportRoutes = require('./routes/support');
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'HP Printer Shop API is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+  // ✅ --- DEBUG LOG 10 ---
+  console.log('SERVER-SIDE: Loading admin routes...');
+  const adminRoutes = require('./routes/admin');
+
+  // ✅ --- DEBUG LOG 11 ---
+  console.log('SERVER-SIDE: All modules loaded. Configuring Express app...');
+  const app = express();
+  const PORT = process.env.PORT || 3001; 
+
+  // Security middleware
+  app.use(helmet());
+
+  // CORS configuration
+  app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+  }));
+
+  // Rate limiting
+  const limiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    message: {
+      success: false,
+      message: 'Too many requests from this IP, please try again later.'
+    }
   });
-});
+  app.use(limiter);
 
-// API routes
-// Vercel routes '/api/...' to this file, and Express handles the sub-path
-app.use('/auth', authRoutes);
-app.use('/products', productRoutes);
-app.use('/cart', cartRoutes);
-app.use('/orders', orderRoutes);
-app.use('/reviews', reviewRoutes);
-app.use('/support', supportRoutes);
-app.use('/admin', adminRoutes);
+  // Body parsing middleware
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ❌ REMOVED: app.get('*', ...)
-// Vercel's vercel.json handles the SPA fallback, not this file.
-
-// 404 handler
-// This will now correctly catch API routes that don't exist
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'API endpoint not found'
+  // Health check endpoint
+  app.get('/health', (req, res) => {
+    res.json({
+      success: true,
+      message: 'HP Printer Shop API is running',
+      timestamp: new Date().toISOString()
+    });
   });
-});
 
+  // API routes
+  app.use('/auth', authRoutes);
+  app.use('/products', productRoutes);
+  app.use('/cart', cartRoutes);
+  app.use('/orders', orderRoutes);
+  app.use('/reviews', reviewRoutes);
+  app.use('/support', supportRoutes);
+  app.use('/admin', adminRoutes);
 
-// Error handling middleware
-app.use(errorHandler);
+  // 404 handler
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      message: 'API endpoint not found'
+    });
+  });
 
-// ---------------------------------------------------------------------------------
-// CRITICAL CHANGE: Export the Express app instance for Vercel Serverless execution.
-// ---------------------------------------------------------------------------------
-module.exports = app;
+  // Error handling middleware
+  app.use(errorHandler);
+
+  // ✅ --- DEBUG LOG 12 ---
+  console.log('SERVER-SIDE: Express app configured. Exporting handler.');
+
+  module.exports = app;
+
+} catch (error) {
+  // ✅ --- DEBUG LOG 13 (CRITICAL) ---
+  // If the crash happens during initialization, this will log it.
+  console.error('SERVER-SIDE: CRASH DURING INITIALIZATION ❌');
+  console.error(error);
+  
+  // Re-throw to ensure Vercel knows the function failed
+  throw error;
+}
