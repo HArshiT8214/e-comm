@@ -5,9 +5,6 @@ class ProductService {
 
   /**
    * Converts MySQL's '?' placeholders to PostgreSQL's positional '$1, $2, $3...'
-   * @param {string} sql - The raw SQL string with '?' placeholders.
-   * @param {Array<any>} params - The parameters to substitute.
-   * @returns {[string, Array<any>]} The new SQL string and parameters array.
    */
   static buildPostgresQuery(sql, params) {
     if (!params) return [sql, []];
@@ -48,7 +45,8 @@ class ProductService {
     const { offset, limit: queryLimit } = getPagination(page, limit);
 
     try {
-      let whereConditions = ['p.is_active = TRUE'];
+      // ✅ FINAL FIX: Include products where is_active is NULL or TRUE
+      let whereConditions = ['(p.is_active IS NULL OR p.is_active = TRUE)'];
       let queryParams = [];
 
       // --- Filters ---
@@ -164,7 +162,7 @@ class ProductService {
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.category_id
         LEFT JOIN reviews r ON p.product_id = r.product_id
-        WHERE p.product_id = ? AND p.is_active = TRUE
+        WHERE p.product_id = ? AND (p.is_active IS NULL OR p.is_active = TRUE)
         GROUP BY 
           p.product_id, c.category_id, c.name, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
@@ -182,7 +180,7 @@ class ProductService {
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
-        WHERE category_id = ? AND product_id != ? AND is_active = TRUE
+        WHERE category_id = ? AND product_id != ? AND (is_active IS NULL OR is_active = TRUE)
         LIMIT 4
       `;
       const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_id, productId]);
@@ -203,7 +201,7 @@ class ProductService {
           c.parent_id,
           COUNT(p.product_id)::INT as product_count
         FROM categories c
-        LEFT JOIN products p ON c.category_id = p.category_id AND p.is_active = TRUE
+        LEFT JOIN products p ON c.category_id = p.category_id AND (p.is_active IS NULL OR p.is_active = TRUE)
         GROUP BY c.category_id
         ORDER BY c.name
       `;
@@ -344,7 +342,7 @@ class ProductService {
           COUNT(r.review_id) as review_count
         FROM products p
         LEFT JOIN reviews r ON p.product_id = r.product_id
-        WHERE p.is_active = TRUE AND p.stock_quantity > 0
+        WHERE (p.is_active IS NULL OR p.is_active = TRUE) AND p.stock_quantity > 0
         GROUP BY p.product_id
         ORDER BY average_rating DESC, p.created_at DESC
         LIMIT ?
