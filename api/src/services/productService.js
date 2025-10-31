@@ -9,7 +9,6 @@ class ProductService {
   static buildPostgresQuery(sql, params) {
     if (!params) return [sql, []];
     let index = 1;
-    // CRITICAL: Replace all '?' with $1, $2, etc., using the count of parameters
     const newSql = sql.replace(/\?/g, () => `$${index++}`);
     return [newSql, params];
   }
@@ -19,21 +18,19 @@ class ProductService {
    */
   async executeQuery(sql, params = []) {
     const [query, pgParams] = ProductService.buildPostgresQuery(sql, params);
-    // Use pool.query for pg, not pool.execute
     const result = await pool.query(query, pgParams);
-    // For pg, results are in result.rows
     return result.rows;
   }
 
   // ------------------------------------------------------------------
-  // Public Methods (Final PostgreSQL Queries)
+  // Public Methods (Corrected: 'category_id' replaced with 'category')
   // ------------------------------------------------------------------
 
   async getProducts(filters = {}) {
     const {
       page = 1,
       limit = 10,
-      category_id,
+      category, // ✅ FIX: Renamed from category_id
       search,
       min_price,
       max_price,
@@ -45,19 +42,18 @@ class ProductService {
     const { offset, limit: queryLimit } = getPagination(page, limit);
 
     try {
-      // ✅ FIX: Removed 'is_active' from WHERE clause
       let whereConditions = []; 
       let queryParams = [];
 
       // --- Filters ---
-      if (category_id) {
-        whereConditions.push('p.category_id = ?');
-        queryParams.push(category_id);
+      // ✅ FIX: Filter by the 'category' varchar column
+      if (category) {
+        whereConditions.push('p.category = ?');
+        queryParams.push(category);
       }
 
       if (search) {
         const term = String(search).trim();
-        // PostgreSQL uses ILIKE for case-insensitive search
         whereConditions.push('(p.name ILIKE ? OR p.description ILIKE ? OR p.sku ILIKE ?)');
         const likeTerm = `%${term}%`;
         queryParams.push(likeTerm, likeTerm, likeTerm);
@@ -90,36 +86,36 @@ class ProductService {
         : 'DESC';
 
       // --- Count query ---
-      // Using '::INT' to ensure correct typecasting for result
       const countQuery = `SELECT COUNT(*)::INT as total FROM products p ${whereClause}`;
       const countResult = await this.executeQuery(countQuery, queryParams);
       const total = parseInt(countResult[0].total);
 
       // --- Products query ---
+      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
           p.image_url, p.brand, p.created_at,
-          c.name as category_name, c.category_id,
+          p.category as category_name, -- Use the varchar column
           COALESCE(AVG(r.rating), 0) as average_rating,
           COUNT(r.review_id) as review_count
         FROM products p
-        LEFT JOIN categories c ON p.category_id = c.category_id
         LEFT JOIN reviews r ON p.product_id = r.product_id
         ${whereClause}
         GROUP BY 
-          p.product_id, c.category_id, c.name, p.name, p.description, p.price, 
+          p.product_id, p.category, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
         ORDER BY p.${sortBy} ${sortOrder}
         LIMIT ? OFFSET ?
       `;
 
-      // Pagination parameters are added to the end
       const productParams = [...queryParams, queryLimit, offset]; 
       const products = await this.executeQuery(productsQuery, productParams);
 
       // --- Attach product images ---
       for (let product of products) {
+        // This query assumes a 'product_images' table exists. 
+        // If it doesn't, this will also fail.
         const imagesQuery = 'SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order';
         const images = await this.executeQuery(imagesQuery, [product.product_id]);
         product.images = images;
@@ -145,7 +141,6 @@ class ProductService {
 
   async searchProducts(searchTerm, filters = {}) {
     try {
-      // Calls the converted getProducts method
       return await this.getProducts({ ...filters, search: String(searchTerm) });
     } catch (error) {
       throw new Error(`Failed to search products: ${error.message}`);
@@ -154,18 +149,17 @@ class ProductService {
 
   async getProductById(productId) {
     try {
-      // ✅ FIX: Removed 'is_active' from WHERE clause
+      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
-          p.image_url, p.brand, p.created_at, c.name as category_name, c.category_id,
+          p.image_url, p.brand, p.created_at, p.category as category_name,
           COALESCE(AVG(r.rating), 0) as average_rating, COUNT(r.review_id) as review_count
         FROM products p
-        LEFT JOIN categories c ON p.category_id = c.category_id
         LEFT JOIN reviews r ON p.product_id = r.product_id
         WHERE p.product_id = ?
         GROUP BY 
-          p.product_id, c.category_id, c.name, p.name, p.description, p.price, 
+          p.product_id, p.category, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
       `;
       const products = await this.executeQuery(productsQuery, [productId]);
@@ -178,14 +172,14 @@ class ProductService {
       const images = await this.executeQuery('SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order', [product.product_id]);
       product.images = images;
       
-      // ✅ FIX: Removed 'is_active' from WHERE clause
+      // ✅ FIX: Use p.category for related products
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
-        WHERE category_id = ? AND product_id != ?
+        WHERE category = ? AND product_id != ?
         LIMIT 4
       `;
-      const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_id, productId]);
+      const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_name, productId]);
       product.related_products = relatedProducts;
 
       return { success: true, data: product };
@@ -196,17 +190,15 @@ class ProductService {
 
   async getCategories() {
     try {
-      // ✅ FIX: Removed 'is_active' from JOIN condition
+      // ✅ FIX: Select distinct categories directly from the products table
       const categoriesQuery = `
         SELECT 
-          c.category_id,
-          c.name,
-          c.parent_id,
-          COUNT(p.product_id)::INT as product_count
-        FROM categories c
-        LEFT JOIN products p ON c.category_id = p.category_id
-        GROUP BY c.category_id
-        ORDER BY c.name
+          category as name,
+          COUNT(product_id)::INT as product_count
+        FROM products
+        WHERE category IS NOT NULL
+        GROUP BY category
+        ORDER BY category
       `;
       const categories = await this.executeQuery(categoriesQuery);
       return { success: true, data: categories };
@@ -216,10 +208,10 @@ class ProductService {
   }
   
   async createProduct(productData) {
-    const { name, description, category_id, price, stock_quantity, sku, brand = 'HP', image_url } = productData;
+    // ✅ FIX: Use 'category' (string) instead of 'category_id' (int)
+    const { name, description, category, price, stock_quantity, sku, brand = 'HP', image_url } = productData;
 
     try {
-      // Check if SKU already exists
       const existingProducts = await this.executeQuery(
         'SELECT product_id FROM products WHERE sku = ?',
         [sku]
@@ -229,13 +221,13 @@ class ProductService {
         throw new Error('Product with this SKU already exists');
       }
 
-      // ✅ FIX: Removed 'is_active' from INSERT statement
+      // ✅ FIX: Changed column name 'category_id' to 'category'
       const insertQuery = `
-        INSERT INTO products (name, description, category_id, price, stock_quantity, sku, brand, image_url) 
+        INSERT INTO products (name, description, category, price, stock_quantity, sku, brand, image_url) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING product_id
       `;
-      const result = await this.executeQuery(insertQuery, [name, description, category_id, price, stock_quantity, sku, brand, image_url]);
+      const result = await this.executeQuery(insertQuery, [name, description, category, price, stock_quantity, sku, brand, image_url]);
 
       return {
         success: true,
@@ -243,7 +235,6 @@ class ProductService {
         data: { product_id: result[0].product_id }
       };
     } catch (error) {
-      // Check for PostgreSQL unique constraint violation (23505)
       if (error.code === '23505') {
         throw new Error('Product with this SKU already exists');
       }
@@ -252,18 +243,18 @@ class ProductService {
   }
 
   async updateProduct(productId, productData) {
-    const { name, description, category_id, price, stock_quantity, sku, brand, image_url } = productData;
-    // PostgreSQL uses CURRENT_TIMESTAMP or DB trigger for updated_at
+    // ✅ FIX: Use 'category' instead of 'category_id'
+    const { name, description, category, price, stock_quantity, sku, brand, image_url } = productData;
 
     try {
+      // ✅ FIX: Changed column name 'category_id' to 'category'
       const updateQuery = `
         UPDATE products 
-        SET name = ?, description = ?, category_id = ?, price = ?, stock_quantity = ?, sku = ?, brand = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, category = ?, price = ?, stock_quantity = ?, sku = ?, brand = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
         WHERE product_id = ?
       `;
-      const result = await this.executeQuery(updateQuery, [name, description, category_id, price, stock_quantity, sku, brand, image_url, productId]);
+      const result = await this.executeQuery(updateQuery, [name, description, category, price, stock_quantity, sku, brand, image_url, productId]);
 
-      // pg returns row count in result.rowCount
       if (result.rowCount === 0) {
         throw new Error('Product not found');
       }
@@ -282,7 +273,7 @@ class ProductService {
 
   async deleteProduct(productId) {
     try {
-      // ✅ FIX: Changed from soft delete (is_active) to a HARD DELETE
+      // This is already correct (it doesn't reference category)
       const result = await this.executeQuery(
         'DELETE FROM products WHERE product_id = ?',
         [productId]
@@ -296,26 +287,24 @@ class ProductService {
         success: true,
         message: 'Product deleted successfully'
       };
-    } catch (error)
- {
+    } catch (error) {
       throw new Error(`Failed to delete product: ${error.message}`);
     }
   }
 
   async updateStock(productId, quantity, reason = 'adjustment') {
     try {
-      // Use client transaction for atomic update (best practice)
+      // This function is database-agnostic and correct
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
 
-        // Update product stock
         await client.query(
           'UPDATE products SET stock_quantity = stock_quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE product_id = $2',
           [quantity, productId]
         );
 
-        // Record inventory movement
+        // This assumes 'inventory_movements' table exists
         await client.query(
           'INSERT INTO inventory_movements (product_id, delta_quantity, reason, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
           [productId, quantity, reason]
@@ -340,7 +329,7 @@ class ProductService {
 
   async getFeaturedProducts(limit = 8) {
     try {
-      // ✅ FIX: Removed 'is_active' from WHERE clause
+      // This is already correct (it doesn't reference category)
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.price, p.image_url, p.sku,

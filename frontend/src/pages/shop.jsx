@@ -36,7 +36,8 @@ function Shop() {
           setProducts(productsResponse.data.products.map(p => ({
             id: p.product_id,
             name: p.name,
-            category: p.category_name || 'Printers',
+            // This now correctly uses the category_name from the (fixed) backend
+            category: p.category_name || 'Printers', 
             price: `$${Number(p.price).toFixed(2)}`,
             originalPrice: p.originalPrice ? `$${Number(p.originalPrice).toFixed(2)}` : `$${(Number(p.price) * 1.2).toFixed(2)}`,
             image: p.image_url || printerImage,
@@ -52,8 +53,9 @@ function Shop() {
         if (categoriesResponse.success) {
           setCategories([
             { id: 'all', name: 'All Products', icon: '🛍️' },
+            // ✅ FINAL FIX: Use cat.name as the ID, not cat.category_id
             ...categoriesResponse.data.map(cat => ({
-              id: cat.category_id,
+              id: cat.name, 
               name: cat.name,
               icon: '🖨️'
             }))
@@ -78,6 +80,8 @@ function Shop() {
     }
   };
 
+  // This filter logic is now correct because both 'product.category' and 'selectedCategory'
+  // will use the category name (e.g., "Laser Printers").
   const filteredProducts = selectedCategory === 'all' 
     ? products 
     : products.filter(product => product.category === selectedCategory);
@@ -227,7 +231,7 @@ function Shop() {
                         e.stopPropagation();
                         handleAddToCart(product);
                       }}
-                      disabled={product.stock_quantity === 0}
+                      disabled={product.stock_qantity === 0}
                     >
                       {product.stock_quantity === 0 ? 'Out of Stock' : 'Add to Cart'}
                     </button>
