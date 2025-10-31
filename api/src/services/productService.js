@@ -27,6 +27,9 @@ class ProductService {
   // ------------------------------------------------------------------
 
   async getProducts(filters = {}) {
+    // ✅ DEBUG LOG: Show what filters are being received
+    console.log('SERVER-SIDE (productService.js): getProducts received filters:', filters);
+
     const {
       page = 1,
       limit = 10,
@@ -86,8 +89,13 @@ class ProductService {
 
       // --- Count query ---
       const countQuery = `SELECT COUNT(*)::INT as total FROM products p ${whereClause}`;
+      
+      // ✅ DEBUG LOG: Show the query being run
+      console.log('SERVER-SIDE (productService.js): Running COUNT query...');
       const countResult = await this.executeQuery(countQuery, queryParams);
       const total = parseInt(countResult[0].total);
+      console.log(`SERVER-SIDE (productService.js): COUNT query successful. Total: ${total}`);
+
 
       // --- Products query ---
       const productsQuery = `
@@ -108,8 +116,15 @@ class ProductService {
       `;
 
       const productParams = [...queryParams, queryLimit, offset]; 
+      
+      // ✅ DEBUG LOG: Show the main products query
+      console.log('SERVER-SIDE (productService.js): Running PRODUCTS query...');
       const products = await this.executeQuery(productsQuery, productParams);
+      console.log(`SERVER-SIDE (productService.js): PRODUCTS query successful. Found: ${products.length}`);
 
+
+      // ✅ DEBUG LOG: Confirming we are NOT running the 'product_images' loop
+      console.log('SERVER-SIDE (productService.js): Skipping product_images loop (table does not exist).');
       // ✅ FIX: Removed loop that queried the non-existent 'product_images' table.
       // The 'image_url' from the 'products' table is already included.
 
@@ -140,6 +155,8 @@ class ProductService {
   }
 
   async getProductById(productId) {
+    // ✅ DEBUG LOG:
+    console.log(`SERVER-SIDE (productService.js): getProductById received ID: ${productId}`);
     try {
       const productsQuery = `
         SELECT 
@@ -153,15 +170,21 @@ class ProductService {
           p.product_id, p.category, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
       `;
+      
+      console.log('SERVER-SIDE (productService.js): Running getProductById query...');
       const products = await this.executeQuery(productsQuery, [productId]);
+      console.log(`SERVER-SIDE (productService.js): getProductById query successful. Found: ${products.length}`);
+
 
       if (products.length === 0) {
-        throw new Error('Product not. found');
+        throw new Error('Product not found');
       }
       const product = products[0];
       
       // ✅ FIX: Removed query for non-existent 'product_images' table.
+      console.log('SERVER-SIDE (productService.js): Skipping product_images loop.');
       
+      console.log('SERVER-SIDE (productService.js): Running RELATED PRODUCTS query...');
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
@@ -169,15 +192,18 @@ class ProductService {
         LIMIT 4
       `;
       const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_name, productId]);
+      console.log('SERVER-SIDE (productService.js): RELATED PRODUCTS query successful.');
       product.related_products = relatedProducts;
 
       return { success: true, data: product };
     } catch (error) {
+      console.error(`❌ POSTGRESQL SQL ERROR in getProductById (ID: ${productId}):`, error.message, error.stack); 
       throw new Error(`Failed to get product: ${error.message}`);
     }
   }
 
   async getCategories() {
+    console.log('SERVER-SIDE (productService.js): Running getCategories query...');
     try {
       const categoriesQuery = `
         SELECT 
@@ -189,8 +215,10 @@ class ProductService {
         ORDER BY category
       `;
       const categories = await this.executeQuery(categoriesQuery);
+      console.log(`SERVER-SIDE (productService.js): getCategories query successful. Found: ${categories.length}`);
       return { success: true, data: categories };
     } catch (error) {
+      console.error('❌ POSTGRESQL SQL ERROR in getCategories:', error.message, error.stack);
       throw new Error(`Failed to get categories: ${error.message}`);
     }
   }
@@ -310,6 +338,7 @@ class ProductService {
   }
 
   async getFeaturedProducts(limit = 8) {
+    console.log('SERVER-SIDE (productService.js): Running getFeaturedProducts query...');
     try {
       const productsQuery = `
         SELECT 
@@ -324,12 +353,14 @@ class ProductService {
         LIMIT ?
       `;
       const products = await this.executeQuery(productsQuery, [limit]);
+      console.log(`SERVER-SIDE (productService.js): getFeaturedProducts query successful. Found: ${products.length}`);
 
       return {
         success: true,
         data: products
       };
     } catch (error) {
+      console.error('❌ POSTGRESQL SQL ERROR in getFeaturedProducts:', error.message, error.stack);
       throw new Error(`Failed to get featured products: ${error.message}`);
     }
   }

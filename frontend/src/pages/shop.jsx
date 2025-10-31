@@ -32,6 +32,11 @@ function Shop() {
           productsAPI.getCategories()
         ]);
 
+        // ✅ DEBUG LOG: Show what the frontend receives from the API
+        console.log('CLIENT-SIDE (shop.jsx): Received productsResponse:', JSON.stringify(productsResponse, null, 2));
+        console.log('CLIENT-SIDE (shop.jsx): Received categoriesResponse:', JSON.stringify(categoriesResponse, null, 2));
+
+
         if (productsResponse.success) {
           setProducts(productsResponse.data.products.map(p => ({
             id: p.product_id,
