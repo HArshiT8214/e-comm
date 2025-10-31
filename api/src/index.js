@@ -2,10 +2,12 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const path = require('path'); // 💡 ADDED: Required for serving static files correctly
 require('dotenv').config();
 
-const { testConnection } = require('./config/database');
+// We no longer need the 'path' module
+// const path = require('path'); 
+
+// const { testConnection } = require('./config/database'); // Commented out to prevent startup crashes
 const errorHandler = require('./middleware/errorHandler');
 
 // Import routes
@@ -40,12 +42,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ---------------------------------------------------------------------
-// 💡 CRITICAL FIX: STATIC FILE SERVING 
-// This must run before API routes to correctly serve frontend assets (manifest.json, etc.).
-// Assuming your frontend build output is located in a directory named 'public'.
-// ---------------------------------------------------------------------
-app.use(express.static('public')); 
+// ❌ REMOVED: app.use(express.static('public'));
+// Vercel's vercel.json handles static file serving, not this file.
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -62,33 +60,20 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/support', supportRoutes);
-app.use('/api/admin', adminRoutes);
+// Vercel routes '/api/...' to this file, and Express handles the sub-path
+app.use('/auth', authRoutes);
+app.use('/products', productRoutes);
+app.use('/cart', cartRoutes);
+app.use('/orders', orderRoutes);
+app.use('/reviews', reviewRoutes);
+app.use('/support', supportRoutes);
+app.use('/admin', adminRoutes);
 
-// ---------------------------------------------------------------------
-// 💡 SPA FALLBACK: Catch-all route for client-side routing
-// This sends the main index.html file for any route not matched by express.static 
-// or the API routes, allowing the frontend router (e.g., React Router) to take over.
-// ---------------------------------------------------------------------
-app.get('*', (req, res, next) => {
-  // If the request is trying to reach an API path, let it continue to the 404 handler below
-  if (req.originalUrl.startsWith('/api') || req.originalUrl === '/health') {
-    return next(); 
-  }
-  
-  // Otherwise, serve the main index.html file
-  // Assumes 'index.html' is in the 'public' directory
-  res.sendFile(path.resolve(__dirname, 'public', 'index.html')); 
-});
-
+// ❌ REMOVED: app.get('*', ...)
+// Vercel's vercel.json handles the SPA fallback, not this file.
 
 // 404 handler
-// This now primarily catches unhandled API routes (i.e., paths starting with /api that don't exist)
+// This will now correctly catch API routes that don't exist
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -104,7 +89,3 @@ app.use(errorHandler);
 // CRITICAL CHANGE: Export the Express app instance for Vercel Serverless execution.
 // ---------------------------------------------------------------------------------
 module.exports = app;
-
-// ---------------------------------------------------------------------------------
-// Keep the database connection test running outside the Express flow if necessary
-// testConnection(); // Uncomment if you need to run the test

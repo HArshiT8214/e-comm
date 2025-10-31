@@ -1,22 +1,18 @@
 const { pool } = require('../config/database');
-const { calculateOrderTotals } = require('../utils/helpers');
+const { calculateOrderTotals } = require('../utils/helpers'); // Assuming this helper exists
 
 class CartService {
 
   /**
-   * Helper functions for PostgreSQL execution (Must be copied from productService.js)
+   * Helper functions for PostgreSQL execution
    */
   static buildPostgresQuery(sql, params) {
     if (!params) return [sql, []];
     let index = 1;
-    // CRITICAL: Replace all '?' with $1, $2, etc., using the count of parameters
     const newSql = sql.replace(/\?/g, () => `$${index++}`);
     return [newSql, params];
   }
 
-  /**
-   * Executes a database query using the pg pool.
-   */
   async executeQuery(sql, params = []) {
     const [query, pgParams] = CartService.buildPostgresQuery(sql, params);
     const result = await pool.query(query, pgParams);
@@ -26,7 +22,7 @@ class CartService {
   // Get or create cart for user
   async getOrCreateCart(userId) {
     try {
-      // Check if cart exists
+      // This query is fine (no schema mismatch)
       const carts = await this.executeQuery(
         'SELECT cart_id FROM carts WHERE user_id = ?',
         [userId]
@@ -34,7 +30,6 @@ class CartService {
 
       let cartId;
       if (carts.length === 0) {
-        // Create new cart and use RETURNING to get ID
         const result = await this.executeQuery(
           'INSERT INTO carts (user_id) VALUES (?) RETURNING cart_id',
           [userId]
@@ -55,6 +50,7 @@ class CartService {
     try {
       const cartId = await this.getOrCreateCart(userId);
 
+      // This query is fine (no schema mismatch)
       const items = await this.executeQuery(
         `SELECT 
           ci.cart_item_id, ci.product_id, ci.quantity, ci.unit_price, ci.added_at,
@@ -67,7 +63,6 @@ class CartService {
         [cartId]
       );
 
-      // Calculate totals
       const totals = calculateOrderTotals(items);
 
       return {
@@ -83,15 +78,15 @@ class CartService {
     }
   }
 
-  // Add item to cart (Uses client.query with explicit $1, $2, etc., which is correct)
+  // Add item to cart
   async addToCart(userId, productId, quantity = 1) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Verify product exists and is in stock
+      // ✅ FIX: Removed 'is_active = TRUE' from WHERE clause
       const productsResult = await client.query(
-        'SELECT product_id, price, stock_quantity FROM products WHERE product_id = $1 AND is_active = TRUE',
+        'SELECT product_id, price, stock_quantity FROM products WHERE product_id = $1',
         [productId]
       );
 
@@ -104,9 +99,14 @@ class CartService {
         throw new Error('Insufficient stock');
       }
 
-      const cartId = await this.getOrCreateCart(userId);
+      // This logic assumes your 'carts' table uses 'user_id' as the FK
+      // and 'cart_items' table uses 'cart_id'.
+      // Based on your schema, this is correct.
+      
+      // Get or create cart ID using the non-transactional helper
+      const cartId = await this.getOrCreateCart(userId); 
 
-      // 2. Check if item already in cart
+      // Check if item already in cart
       const existingItemsResult = await client.query(
         'SELECT cart_item_id, quantity FROM cart_items WHERE cart_id = $1 AND product_id = $2',
         [cartId, productId]
@@ -143,7 +143,7 @@ class CartService {
     }
   }
 
-  // Update cart item quantity (Uses client.query with explicit $1, $2, etc., which is correct)
+  // Update cart item quantity
   async updateCartItem(userId, cartItemId, quantity) {
     const client = await pool.connect();
     try {
@@ -187,7 +187,7 @@ class CartService {
     }
   }
 
-  // Remove item from cart (Uses pool.query with explicit $1, $2, etc., which is correct)
+  // Remove item from cart
   async removeFromCart(userId, cartItemId) {
     try {
       // Verify cart item belongs to user and delete
@@ -198,7 +198,7 @@ class CartService {
          AND ci.cart_item_id = $1 AND c.user_id = $2`,
         [cartItemId, userId]
       );
-      // pg returns rowCount, not affectedRows
+      
       if (result.rowCount === 0) {
         throw new Error('Cart item not found');
       }
@@ -209,7 +209,7 @@ class CartService {
     }
   }
 
-  // Clear cart (Uses pool.query with explicit $1, which is correct)
+  // Clear cart
   async clearCart(userId) {
     try {
       const cartId = await this.getOrCreateCart(userId);
@@ -225,7 +225,7 @@ class CartService {
     }
   }
 
-  // Get cart count (Uses pool.query with explicit $1, which is correct)
+  // Get cart count
   async getCartCount(userId) {
     try {
       const cartId = await this.getOrCreateCart(userId);
@@ -235,14 +235,13 @@ class CartService {
         [cartId]
       );
 
-      // COALESCE ensures total_items is a string/number that needs parsing
       return { success: true, data: { count: parseInt(result.rows[0].total_items) } };
     } catch (error) {
       throw new Error(`Failed to get cart count: ${error.message}`);
     }
   }
 
-  // Validate cart before checkout (Uses executeQuery with '?' placeholders, which is correct)
+  // Validate cart before checkout
   async validateCart(userId) {
     try {
       const cartData = await this.getCartItems(userId);
@@ -251,9 +250,9 @@ class CartService {
       const validationErrors = [];
 
       for (const item of items) {
-        // Check if product still exists and is active
+        // ✅ FIX: Removed 'is_active = TRUE'
         const productsResult = await this.executeQuery(
-          'SELECT product_id, name, stock_quantity, price FROM products WHERE product_id = ? AND is_active = TRUE',
+          'SELECT product_id, name, stock_quantity, price FROM products WHERE product_id = ?',
           [item.product_id]
         );
 

@@ -40,6 +40,7 @@ class UserService {
       const passwordHash = await bcrypt.hash(password, saltRounds);
 
       // Insert user and use RETURNING to get ID
+      // ✅ FIX: 'is_active' is TRUE
       const result = await executeQuery(
         `INSERT INTO users (first_name, last_name, email, password_hash, phone, role, is_active) 
          VALUES (?, ?, ?, ?, ?, 'customer', TRUE) RETURNING user_id`,
@@ -93,6 +94,7 @@ class UserService {
 
       const user = users[0];
 
+      // ✅ FIX: Check boolean 'is_active'
       if (!user.is_active) {
         throw new Error('Account is deactivated');
       }
@@ -130,7 +132,7 @@ class UserService {
   // Get user profile
   async getUserProfile(userId) {
     try {
-      // POSTGRESQL CHANGE: is_active = TRUE
+      // ✅ FIX: is_active = TRUE
       const users = await executeQuery(
         `SELECT user_id, first_name, last_name, email, phone, role, created_at 
          FROM users WHERE user_id = ? AND is_active = TRUE`,
@@ -164,13 +166,13 @@ class UserService {
     const { first_name, last_name, phone } = updateData;
     
     try {
-      // POSTGRESQL CHANGE: updated_at is handled by DB trigger OR must be explicitly set
+      // ✅ FIX: updated_at = CURRENT_TIMESTAMP
       const result = await executeQuery(
         'UPDATE users SET first_name = ?, last_name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [first_name, last_name, phone, userId]
       );
 
-      // POSTGRESQL CHANGE: Check rowCount instead of affectedRows
+      // ✅ FIX: Check rowCount
       if (result.rowCount === 0) {
          throw new Error('User not found');
       }
@@ -231,7 +233,7 @@ class UserService {
   // Request password reset (Simplified: No custom reset table used)
   async requestPasswordReset(email) {
     try {
-      // POSTGRESQL CHANGE: is_active = TRUE
+      // ✅ FIX: is_active = TRUE
       const users = await executeQuery(
         'SELECT user_id, email FROM users WHERE email = ? AND is_active = TRUE',
         [email]
@@ -248,8 +250,7 @@ class UserService {
       // It is highly recommended to create a dedicated 'password_resets' table.
 
       const resetToken = generateResetToken();
-      const expiresAt = new Date(Date.now() + 3600000); // 1 hour
-
+      
       // Store reset token temporarily
       await executeQuery(
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
@@ -279,13 +280,14 @@ class UserService {
     try {
       // If this is set as default, unset other defaults
       if (is_default) {
+        // ✅ FIX: is_default = FALSE
         await executeQuery(
-          'UPDATE addresses SET is_default = FALSE WHERE user_id = ?', // POSTGRESQL CHANGE: boolean
+          'UPDATE addresses SET is_default = FALSE WHERE user_id = ?',
           [userId]
         );
       }
 
-      // POSTGRESQL CHANGE: is_default boolean, RETURNING address_id
+      // ✅ FIX: is_default boolean, RETURNING address_id
       const result = await executeQuery(
         `INSERT INTO addresses (user_id, line1, line2, city, state, zipcode, country, is_default) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING address_id`,
@@ -319,13 +321,14 @@ class UserService {
 
       // If this is set as default, unset other defaults
       if (is_default) {
+        // ✅ FIX: is_default = FALSE
         await executeQuery(
           'UPDATE addresses SET is_default = FALSE WHERE user_id = ? AND address_id != ?',
           [userId, addressId]
         );
       }
 
-      // POSTGRESQL CHANGE: is_default boolean, updated_at, check rowCount
+      // ✅ FIX: is_default boolean, updated_at, check rowCount
       const result = await executeQuery(
         `UPDATE addresses SET line1 = ?, line2 = ?, city = ?, state = ?, zipcode = ?, country = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE address_id = ? AND user_id = ?`,
@@ -333,7 +336,7 @@ class UserService {
       );
 
       if (result.rowCount === 0) {
-         throw new Error('Address not found'); // Should not happen due to check above, but safe
+         throw new Error('Address not found');
       }
 
       return {
@@ -353,7 +356,7 @@ class UserService {
         [addressId, userId]
       );
 
-      // POSTGRESQL CHANGE: Check rowCount instead of affectedRows
+      // ✅ FIX: Check rowCount
       if (result.rowCount === 0) {
         throw new Error('Address not found');
       }
