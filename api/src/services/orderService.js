@@ -12,8 +12,10 @@ const executeQuery = async (sql, params = []) => {
     };
     
     const [query, pgParams] = buildPostgresQuery(sql, params);
+    
+    // ✅ FIX: Return the *entire* result object, not just result.rows
     const result = await pool.query(query, pgParams);
-    return result.rows;
+    return result; 
 };
 
 
@@ -55,7 +57,6 @@ class OrderService {
         }
         
         // 2. Calculate totals (assuming helper exists)
-        // Note: Your schema doesn't show coupons, so discount is 0
         const totals = calculateOrderTotals(cartItems, 0, 0); // (items, discount, shipping)
 
         // 3. Check stock availability
@@ -66,7 +67,6 @@ class OrderService {
         }
 
         // 4. Create order
-        // ✅ FIX: Schema uses 'shipping_address' (text), 'payment_method', 'payment_status'
         const orderInsertResult = await client.query(
           `INSERT INTO orders (user_id, status, total_amount, shipping_address, payment_method, payment_status) 
            VALUES ($1, 'pending', $2, $3, $4, 'pending') RETURNING order_id`, // Use RETURNING
@@ -88,7 +88,7 @@ class OrderService {
             [item.quantity, item.product_id]
           );
 
-          // Record inventory movement (assuming 'inventory_movements' table exists)
+          // ✅ FIX: Commented out query to non-existent 'inventory_movements' table
           // await client.query(
           //   'INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id) VALUES ($1, $2, $3, $4, $5)',
           //   [item.product_id, -item.quantity, 'order', 'order', orderId]
@@ -143,8 +143,8 @@ class OrderService {
   // Get order by ID
   async getOrderById(orderId, userId) {
     try {
-      // ✅ FIX: Matched columns to your schema (removed billing/shipping IDs)
-      const orders = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const ordersResult = await executeQuery(
         `SELECT 
           o.order_id, o.status, o.total_amount, o.created_at, o.updated_at,
           o.shipping_address, o.payment_method, o.payment_status
@@ -153,14 +153,15 @@ class OrderService {
         [orderId, userId]
       );
 
-      if (orders.length === 0) {
+      if (ordersResult.rows.length === 0) {
         throw new Error('Order not found');
       }
 
-      const order = orders[0];
+      const order = ordersResult.rows[0];
 
       // Get order items
-      const items = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const itemsResult = await executeQuery(
         `SELECT 
           oi.order_item_id, oi.product_id, oi.quantity, oi.price,
           p.name, p.image_url, p.sku
@@ -171,11 +172,7 @@ class OrderService {
         [orderId]
       );
 
-      order.items = items;
-
-      // ✅ FIX: Removed queries for non-existent 'payments' and 'shipping' tables
-      // order.payments = ...
-      // order.shipping = ...
+      order.items = itemsResult.rows;
 
       return { success: true, data: order };
     } catch (error) {
@@ -198,11 +195,12 @@ class OrderService {
       }
   
       // Get total count
+      // ✅ FIX: Read from result.rows
       const countResult = await executeQuery(
         `SELECT COUNT(*) as total FROM orders o ${whereClause}`,
         queryParams
       );
-      const total = parseInt(countResult[0].total);
+      const total = parseInt(countResult.rows[0].total);
   
       const query = `
         SELECT 
@@ -213,12 +211,13 @@ class OrderService {
         LIMIT ? OFFSET ?
       `;
   
-      const orders = await executeQuery(query, [...queryParams, limit, offset]);
+      // ✅ FIX: Read from result.rows
+      const ordersResult = await executeQuery(query, [...queryParams, limit, offset]);
   
       return {
         success: true,
         data: {
-          orders,
+          orders: ordersResult.rows,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -252,8 +251,6 @@ class OrderService {
       if (updateResult.rowCount === 0) {
         throw new Error('Order not found');
       }
-
-      // ✅ FIX: Removed logic for non-existent 'shipping' table
       
       await client.query('COMMIT');
       return { success: true, message: 'Order status updated successfully' };
@@ -279,7 +276,6 @@ class OrderService {
         throw new Error('Order not found');
       }
 
-      // ✅ FIX: Adjusted valid statuses to match schema
       if (!['pending', 'processing'].includes(orders.rows[0].status)) {
         throw new Error('Order cannot be cancelled');
       }
@@ -305,7 +301,7 @@ class OrderService {
             [item.quantity, item.product_id]
           );
 
-          // Record inventory movement (assuming 'inventory_movements' table exists)
+          // ✅ FIX: Commented out query to non-existent 'inventory_movements' table
           // await client.query(
           //   'INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id) VALUES ($1, $2, $3, $4, $5)',
           //   [item.product_id, item.quantity, 'return', 'order', orderId]
@@ -329,8 +325,8 @@ class OrderService {
   // Get order statistics (admin only)
   async getOrderStatistics() {
     try {
-      // ✅ FIX: Adjusted statuses to match schema
-      const stats = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const statsResult = await executeQuery(
         `SELECT 
           COUNT(*)::INT as total_orders,
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END)::INT as pending_orders,
@@ -342,7 +338,7 @@ class OrderService {
         FROM orders`
       );
 
-      return { success: true, data: stats[0] };
+      return { success: true, data: statsResult.rows[0] };
     } catch (error) {
       throw new Error(`Failed to get order statistics: ${error.message}`);
     }

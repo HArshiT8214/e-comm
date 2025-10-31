@@ -15,11 +15,13 @@ class ProductService {
 
   /**
    * Executes a database query using the pg pool.
+   * ✅ FIX: This helper MUST return the *entire result* object, not just result.rows,
+   * so that we can check result.rowCount for UPDATE/DELETE statements.
    */
   async executeQuery(sql, params = []) {
     const [query, pgParams] = ProductService.buildPostgresQuery(sql, params);
     const result = await pool.query(query, pgParams);
-    return result.rows;
+    return result; 
   }
 
   // ------------------------------------------------------------------
@@ -50,24 +52,20 @@ class ProductService {
         whereConditions.push('p.category = ?'); // ✅ Use varchar category
         queryParams.push(category);
       }
-
       if (search) {
         const term = String(search).trim();
         whereConditions.push('(p.name ILIKE ? OR p.description ILIKE ? OR p.sku ILIKE ?)');
         const likeTerm = `%${term}%`;
         queryParams.push(likeTerm, likeTerm, likeTerm);
       }
-
       if (min_price) {
         whereConditions.push('p.price >= ?');
         queryParams.push(min_price);
       }
-
       if (max_price) {
         whereConditions.push('p.price <= ?');
         queryParams.push(max_price);
       }
-
       if (in_stock) {
         whereConditions.push('p.stock_quantity > 0');
       }
@@ -75,10 +73,9 @@ class ProductService {
       const whereClause =
         whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-      // --- Sorting (whitelisted) ---
+      // --- Sorting ---
       const allowedSortBy = ['created_at', 'price', 'name', 'stock_quantity'];
       const allowedSortOrder = ['ASC', 'DESC'];
-
       const sortBy = allowedSortBy.includes(sort_by) ? sort_by : 'created_at';
       const sortOrder = allowedSortOrder.includes(sort_order.toUpperCase())
         ? sort_order.toUpperCase()
@@ -86,17 +83,16 @@ class ProductService {
 
       // --- Count query ---
       const countQuery = `SELECT COUNT(*)::INT as total FROM products p ${whereClause}`;
-      const countResult = await this.executeQuery(countQuery, queryParams);
-      const total = parseInt(countResult[0].total);
+      // ✅ FIX: Read from result.rows for SELECT
+      const countResult = await this.executeQuery(countQuery, queryParams); 
+      const total = parseInt(countResult.rows[0].total);
 
       // --- Products query ---
-      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
-          p.image_url, -- ✅ Your image_url is already here
-          p.brand, p.created_at,
-          p.category as category_name, -- Use the varchar column
+          p.image_url, p.brand, p.created_at,
+          p.category as category_name,
           COALESCE(AVG(r.rating), 0) as average_rating,
           COUNT(r.review_id) as review_count
         FROM products p
@@ -110,9 +106,11 @@ class ProductService {
       `;
 
       const productParams = [...queryParams, queryLimit, offset]; 
-      const products = await this.executeQuery(productsQuery, productParams);
+      // ✅ FIX: Read from result.rows for SELECT
+      const productsResult = await this.executeQuery(productsQuery, productParams); 
+      const products = productsResult.rows;
 
-      // ✅ FIX: Removed loop that queried the non-existent 'product_images' table.
+      // ✅ FIX: Removed loop for non-existent 'product_images' table.
 
       return {
         success: true,
@@ -142,12 +140,10 @@ class ProductService {
 
   async getProductById(productId) {
     try {
-      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
-          p.image_url, -- ✅ Your image_url is already here
-          p.brand, p.created_at, p.category as category_name,
+          p.image_url, p.brand, p.created_at, p.category as category_name,
           COALESCE(AVG(r.rating), 0) as average_rating, COUNT(r.review_id) as review_count
         FROM products p
         LEFT JOIN reviews r ON p.product_id = r.product_id
@@ -156,24 +152,25 @@ class ProductService {
           p.product_id, p.category, p.name, p.description, p.price, 
           p.stock_quantity, p.sku, p.image_url, p.brand, p.created_at
       `;
-      const products = await this.executeQuery(productsQuery, [productId]);
+      // ✅ FIX: Read from result.rows for SELECT
+      const productsResult = await this.executeQuery(productsQuery, [productId]);
 
-      if (products.length === 0) {
+      if (productsResult.rows.length === 0) {
         throw new Error('Product not found');
       }
-      const product = products[0];
+      const product = productsResult.rows[0];
       
-      // ✅ FIX: Removed query for non-existent 'product_images' table.
+      // ✅ FIX: Removed 'product_images' query
       
-      // ✅ FIX: Use p.category for related products
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
         WHERE category = ? AND product_id != ?
         LIMIT 4
       `;
-      const relatedProducts = await this.executeQuery(relatedProductsQuery, [product.category_name, productId]);
-      product.related_products = relatedProducts;
+      // ✅ FIX: Read from result.rows for SELECT
+      const relatedProductsResult = await this.executeQuery(relatedProductsQuery, [product.category_name, productId]);
+      product.related_products = relatedProductsResult.rows;
 
       return { success: true, data: product };
     } catch (error) {
@@ -183,7 +180,6 @@ class ProductService {
 
   async getCategories() {
     try {
-      // ✅ FIX: Select distinct categories directly from the products table
       const categoriesQuery = `
         SELECT 
           category as name,
@@ -193,39 +189,40 @@ class ProductService {
         GROUP BY category
         ORDER BY category
       `;
-      const categories = await this.executeQuery(categoriesQuery);
-      return { success: true, data: categories };
+      // ✅ FIX: Read from result.rows for SELECT
+      const categoriesResult = await this.executeQuery(categoriesQuery);
+      return { success: true, data: categoriesResult.rows };
     } catch (error) {
       throw new Error(`Failed to get categories: ${error.message}`);
     }
   }
   
   async createProduct(productData) {
-    // ✅ FIX: Use 'category' (string) instead of 'category_id' (int)
     const { name, description, category, price, stock_quantity, sku, brand = 'HP', image_url } = productData;
 
     try {
+      // ✅ FIX: Read from result.rows for SELECT
       const existingProducts = await this.executeQuery(
         'SELECT product_id FROM products WHERE sku = ?',
         [sku]
       );
 
-      if (existingProducts.length > 0) {
+      if (existingProducts.rows.length > 0) {
         throw new Error('Product with this SKU already exists');
       }
 
-      // ✅ FIX: Changed column name 'category_id' to 'category' and removed 'is_active'
       const insertQuery = `
         INSERT INTO products (name, description, category, price, stock_quantity, sku, brand, image_url) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING product_id
       `;
+      // ✅ FIX: Read from result.rows for SELECT (RETURNING)
       const result = await this.executeQuery(insertQuery, [name, description, category, price, stock_quantity, sku, brand, image_url]);
 
       return {
         success: true,
         message: 'Product created successfully',
-        data: { product_id: result[0].product_id }
+        data: { product_id: result.rows[0].product_id }
       };
     } catch (error) {
       if (error.code === '23505') {
@@ -236,16 +233,15 @@ class ProductService {
   }
 
   async updateProduct(productId, productData) {
-    // ✅ FIX: Use 'category' instead of 'category_id'
     const { name, description, category, price, stock_quantity, sku, brand, image_url } = productData;
 
     try {
-      // ✅ FIX: Changed column name 'category_id' to 'category'
       const updateQuery = `
         UPDATE products 
         SET name = ?, description = ?, category = ?, price = ?, stock_quantity = ?, sku = ?, brand = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
         WHERE product_id = ?
       `;
+      // ✅ FIX: Check result.rowCount
       const result = await this.executeQuery(updateQuery, [name, description, category, price, stock_quantity, sku, brand, image_url, productId]);
 
       if (result.rowCount === 0) {
@@ -266,7 +262,7 @@ class ProductService {
 
   async deleteProduct(productId) {
     try {
-      // ✅ FIX: Changed from soft delete (is_active) to a HARD DELETE
+      // ✅ FIX: Check result.rowCount
       const result = await this.executeQuery(
         'DELETE FROM products WHERE product_id = ?',
         [productId]
@@ -286,7 +282,6 @@ class ProductService {
   }
 
   async updateStock(productId, quantity, reason = 'adjustment') {
-    // This function is correct as-is, assuming 'inventory_movements' table exists
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -295,12 +290,11 @@ class ProductService {
         [quantity, productId]
       );
       
-      // NOTE: This assumes 'inventory_movements' table exists. 
-      // If it doesn't, this line will crash the function.
-      await client.query(
-        'INSERT INTO inventory_movements (product_id, delta_quantity, reason, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
-        [productId, quantity, reason]
-      );
+      // ✅ FIX: Commented out query to non-existent 'inventory_movements' table
+      // await client.query(
+      //   'INSERT INTO inventory_movements (product_id, delta_quantity, reason, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
+      //   [productId, quantity, reason]
+      // );
       
       await client.query('COMMIT');
       
@@ -318,7 +312,6 @@ class ProductService {
 
   async getFeaturedProducts(limit = 8) {
     try {
-      // ✅ FIX: Removed 'is_active'
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.price, p.image_url, p.sku,
@@ -331,10 +324,11 @@ class ProductService {
         ORDER BY average_rating DESC, p.created_at DESC
         LIMIT ?
       `;
-      const products = await this.executeQuery(productsQuery, [limit]);
+      // ✅ FIX: Read from result.rows for SELECT
+      const productsResult = await this.executeQuery(productsQuery, [limit]);
       return {
         success: true,
-        data: products
+        data: productsResult.rows
       };
     } catch (error) {
       throw new Error(`Failed to get featured products: ${error.message}`);

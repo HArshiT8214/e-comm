@@ -10,8 +10,10 @@ const executeQuery = async (sql, params = []) => {
     };
     
     const [query, pgParams] = buildPostgresQuery(sql, params);
+
+    // ✅ FIX: Return the *entire* result object, not just result.rows
     const result = await pool.query(query, pgParams);
-    return result.rows;
+    return result;
 };
 
 class ReviewService {
@@ -21,7 +23,7 @@ class ReviewService {
     
     try {
       // 1. Check if user has purchased this product
-      // POSTGRESQL CHANGE: Use executeQuery
+      // ✅ FIX: Read from result.rows
       const purchases = await executeQuery(
         `SELECT 1 FROM order_items oi
          JOIN orders o ON oi.order_id = o.order_id
@@ -29,22 +31,23 @@ class ReviewService {
         [userId, productId]
       );
 
-      if (purchases.length === 0) {
+      if (purchases.rows.length === 0) {
         throw new Error('You must purchase this product before reviewing it');
       }
 
       // 2. Check if user already reviewed this product
+      // ✅ FIX: Read from result.rows
       const existingReviews = await executeQuery(
         'SELECT review_id FROM reviews WHERE user_id = ? AND product_id = ?',
         [userId, productId]
       );
 
-      if (existingReviews.length > 0) {
+      if (existingReviews.rows.length > 0) {
         throw new Error('You have already reviewed this product');
       }
 
       // 3. Add review
-      // POSTGRESQL CHANGE: Use RETURNING review_id
+      // ✅ FIX: Read from result.rows
       const result = await executeQuery(
         'INSERT INTO reviews (user_id, product_id, rating, comment) VALUES (?, ?, ?, ?) RETURNING review_id',
         [userId, productId, rating, comment || null]
@@ -53,7 +56,7 @@ class ReviewService {
       return {
         success: true,
         message: 'Review added successfully',
-        data: { review_id: result[0].review_id }
+        data: { review_id: result.rows[0].review_id }
       };
     } catch (error) {
       throw new Error(`Failed to add review: ${error.message}`);
@@ -75,14 +78,16 @@ class ReviewService {
       }
 
       // Get total count
+      // ✅ FIX: Read from result.rows
       const countResult = await executeQuery(
         `SELECT COUNT(*) as total FROM reviews r ${whereClause}`,
         queryParams
       );
-      const total = parseInt(countResult[0].total);
+      const total = parseInt(countResult.rows[0].total);
 
       // Get reviews
-      const reviews = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const reviewsResult = await executeQuery(
         `SELECT 
           r.review_id, r.rating, r.comment, r.created_at, u.first_name, u.last_name
         FROM reviews r
@@ -94,8 +99,8 @@ class ReviewService {
       );
 
       // Get rating summary
-      // POSTGRESQL CHANGE: SUM(CASE) and AVG require casting to number
-      const ratingSummary = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const ratingSummaryResult = await executeQuery(
         `SELECT 
           AVG(rating)::NUMERIC(10,2) as average_rating,
           COUNT(*)::INT as total_reviews,
@@ -111,8 +116,8 @@ class ReviewService {
       return {
         success: true,
         data: {
-          reviews,
-          rating_summary: ratingSummary[0],
+          reviews: reviewsResult.rows,
+          rating_summary: ratingSummaryResult.rows[0],
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -133,14 +138,16 @@ class ReviewService {
 
     try {
       // Get total count
+      // ✅ FIX: Read from result.rows
       const countResult = await executeQuery(
         'SELECT COUNT(*) as total FROM reviews WHERE user_id = ?',
         [userId]
       );
-      const total = parseInt(countResult[0].total);
+      const total = parseInt(countResult.rows[0].total);
 
       // Get reviews
-      const reviews = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const reviewsResult = await executeQuery(
         `SELECT 
           r.review_id, r.rating, r.comment, r.created_at,
           p.name as product_name, p.image_url, p.sku
@@ -155,7 +162,7 @@ class ReviewService {
       return {
         success: true,
         data: {
-          reviews,
+          reviews: reviewsResult.rows,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -175,16 +182,17 @@ class ReviewService {
     
     try {
       // Verify review belongs to user
+      // ✅ FIX: Read from result.rows
       const reviews = await executeQuery(
         'SELECT review_id FROM reviews WHERE review_id = ? AND user_id = ?',
         [reviewId, userId]
       );
 
-      if (reviews.length === 0) {
+      if (reviews.rows.length === 0) {
         throw new Error('Review not found');
       }
 
-      // POSTGRESQL CHANGE: updated_at is CURRENT_TIMESTAMP; check rowCount
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'UPDATE reviews SET rating = ?, comment = ?, created_at = CURRENT_TIMESTAMP WHERE review_id = ?',
         [rating, comment, reviewId]
@@ -203,7 +211,7 @@ class ReviewService {
   // Delete review
   async deleteReview(userId, reviewId) {
     try {
-      // POSTGRESQL CHANGE: check rowCount
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'DELETE FROM reviews WHERE review_id = ? AND user_id = ?',
         [reviewId, userId]
@@ -222,8 +230,8 @@ class ReviewService {
   // Get review statistics for product
   async getProductReviewStats(productId) {
     try {
-      // POSTGRESQL CHANGE: Use casting
-      const stats = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const statsResult = await executeQuery(
         `SELECT 
           AVG(rating)::NUMERIC(10,2) as average_rating,
           COUNT(*)::INT as total_reviews,
@@ -236,7 +244,7 @@ class ReviewService {
         [productId]
       );
 
-      return { success: true, data: stats[0] };
+      return { success: true, data: statsResult.rows[0] };
     } catch (error) {
       throw new Error(`Failed to get review statistics: ${error.message}`);
     }
@@ -245,7 +253,8 @@ class ReviewService {
   // Get recent reviews (admin)
   async getRecentReviews(limit = 10) {
     try {
-      const reviews = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const reviewsResult = await executeQuery(
         `SELECT 
           r.review_id, r.rating, r.comment, r.created_at,
           u.first_name, u.last_name,
@@ -258,7 +267,7 @@ class ReviewService {
         [limit]
       );
 
-      return { success: true, data: reviews };
+      return { success: true, data: reviewsResult.rows };
     } catch (error) {
       throw new Error(`Failed to get recent reviews: ${error.message}`);
     }

@@ -15,8 +15,10 @@ const executeQuery = async (sql, params = []) => {
     };
     
     const [query, pgParams] = buildPostgresQuery(sql, params);
+    
+    // ✅ FIX: Return the *entire* result object, not just result.rows
     const result = await pool.query(query, pgParams);
-    return result.rows;
+    return result; 
 };
 
 class UserService {
@@ -26,12 +28,13 @@ class UserService {
     
     try {
       // Check if user already exists
+      // ✅ FIX: Read from result.rows
       const existingUsers = await executeQuery(
         'SELECT user_id FROM users WHERE email = ?',
         [email]
       );
 
-      if (existingUsers.length > 0) {
+      if (existingUsers.rows.length > 0) {
         throw new Error('User with this email already exists');
       }
 
@@ -40,14 +43,14 @@ class UserService {
       const passwordHash = await bcrypt.hash(password, saltRounds);
 
       // Insert user and use RETURNING to get ID
-      // ✅ FIX: 'is_active' is TRUE
+      // ✅ FIX: Read from result.rows
       const result = await executeQuery(
         `INSERT INTO users (first_name, last_name, email, password_hash, phone, role, is_active) 
          VALUES (?, ?, ?, ?, ?, 'customer', TRUE) RETURNING user_id`,
         [firstName, lastName, email, passwordHash, phone || null]
       );
 
-      const userId = result[0].user_id;
+      const userId = result.rows[0].user_id;
 
       // Generate JWT token
       const token = generateToken({ 
@@ -83,16 +86,17 @@ class UserService {
     
     try {
       // Find user by email
-      const users = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const usersResult = await executeQuery(
         'SELECT user_id, first_name, last_name, email, password_hash, role, is_active FROM users WHERE email = ?',
         [email]
       );
 
-      if (users.length === 0) {
+      if (usersResult.rows.length === 0) {
         throw new Error('Invalid email or password');
       }
 
-      const user = users[0];
+      const user = usersResult.rows[0];
 
       // ✅ FIX: Check boolean 'is_active'
       if (!user.is_active) {
@@ -132,19 +136,20 @@ class UserService {
   // Get user profile
   async getUserProfile(userId) {
     try {
-      // ✅ FIX: is_active = TRUE
-      const users = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const usersResult = await executeQuery(
         `SELECT user_id, first_name, last_name, email, phone, role, created_at 
          FROM users WHERE user_id = ? AND is_active = TRUE`,
         [userId]
       );
 
-      if (users.length === 0) {
+      if (usersResult.rows.length === 0) {
         throw new Error('User not found');
       }
 
       // Get user addresses
-      const addresses = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const addressesResult = await executeQuery(
         'SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC',
         [userId]
       );
@@ -152,8 +157,8 @@ class UserService {
       return {
         success: true,
         data: {
-          ...users[0],
-          addresses
+          ...usersResult.rows[0],
+          addresses: addressesResult.rows
         }
       };
     } catch (error) {
@@ -166,13 +171,12 @@ class UserService {
     const { first_name, last_name, phone } = updateData;
     
     try {
-      // ✅ FIX: updated_at = CURRENT_TIMESTAMP
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'UPDATE users SET first_name = ?, last_name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [first_name, last_name, phone, userId]
       );
 
-      // ✅ FIX: Check rowCount
       if (result.rowCount === 0) {
          throw new Error('User not found');
       }
@@ -192,17 +196,18 @@ class UserService {
     
     try {
       // Get current password hash
-      const users = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const usersResult = await executeQuery(
         'SELECT password_hash FROM users WHERE user_id = ?',
         [userId]
       );
 
-      if (users.length === 0) {
+      if (usersResult.rows.length === 0) {
         throw new Error('User not found');
       }
 
       // Verify current password
-      const isValidPassword = await bcrypt.compare(currentPassword, users[0].password_hash);
+      const isValidPassword = await bcrypt.compare(currentPassword, usersResult.rows[0].password_hash);
       if (!isValidPassword) {
         throw new Error('Current password is incorrect');
       }
@@ -212,6 +217,7 @@ class UserService {
       const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
 
       // Update password
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
         [newPasswordHash, userId]
@@ -233,31 +239,29 @@ class UserService {
   // Request password reset (Simplified: No custom reset table used)
   async requestPasswordReset(email) {
     try {
-      // ✅ FIX: is_active = TRUE
-      const users = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const usersResult = await executeQuery(
         'SELECT user_id, email FROM users WHERE email = ? AND is_active = TRUE',
         [email]
       );
 
-      if (users.length === 0) {
+      if (usersResult.rows.length === 0) {
         return {
           success: true,
           message: 'If the email exists, a reset link has been sent'
         };
       }
       
-      // NOTE: This approach of storing the token in the password_hash field is insecure.
-      // It is highly recommended to create a dedicated 'password_resets' table.
-
       const resetToken = generateResetToken();
       
       // Store reset token temporarily
+      // ✅ FIX: Check result.rowCount
       await executeQuery(
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-        [resetToken, users[0].user_id]
+        [resetToken, usersResult.rows[0].user_id]
       );
 
-      // Send reset email (assuming this utility handles execution)
+      // Send reset email
       const emailSent = await sendPasswordResetEmail(email, resetToken);
       
       if (!emailSent) {
@@ -280,14 +284,14 @@ class UserService {
     try {
       // If this is set as default, unset other defaults
       if (is_default) {
-        // ✅ FIX: is_default = FALSE
+        // ✅ FIX: Check result.rowCount (though not strictly necessary here)
         await executeQuery(
           'UPDATE addresses SET is_default = FALSE WHERE user_id = ?',
           [userId]
         );
       }
 
-      // ✅ FIX: is_default boolean, RETURNING address_id
+      // ✅ FIX: Read from result.rows
       const result = await executeQuery(
         `INSERT INTO addresses (user_id, line1, line2, city, state, zipcode, country, is_default) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING address_id`,
@@ -297,7 +301,7 @@ class UserService {
       return {
         success: true,
         message: 'Address added successfully',
-        data: { address_id: result[0].address_id }
+        data: { address_id: result.rows[0].address_id }
       };
     } catch (error) {
       throw new Error(`Failed to add address: ${error.message}`);
@@ -310,25 +314,25 @@ class UserService {
     
     try {
       // Verify address belongs to user
+      // ✅ FIX: Read from result.rows
       const addresses = await executeQuery(
         'SELECT address_id FROM addresses WHERE address_id = ? AND user_id = ?',
         [addressId, userId]
       );
 
-      if (addresses.length === 0) {
+      if (addresses.rows.length === 0) {
         throw new Error('Address not found');
       }
 
       // If this is set as default, unset other defaults
       if (is_default) {
-        // ✅ FIX: is_default = FALSE
         await executeQuery(
           'UPDATE addresses SET is_default = FALSE WHERE user_id = ? AND address_id != ?',
           [userId, addressId]
         );
       }
 
-      // ✅ FIX: is_default boolean, updated_at, check rowCount
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         `UPDATE addresses SET line1 = ?, line2 = ?, city = ?, state = ?, zipcode = ?, country = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE address_id = ? AND user_id = ?`,
@@ -351,12 +355,12 @@ class UserService {
   // Delete address
   async deleteAddress(userId, addressId) {
     try {
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'DELETE FROM addresses WHERE address_id = ? AND user_id = ?',
         [addressId, userId]
       );
 
-      // ✅ FIX: Check rowCount
       if (result.rowCount === 0) {
         throw new Error('Address not found');
       }

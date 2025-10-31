@@ -10,8 +10,10 @@ const executeQuery = async (sql, params = []) => {
     };
     
     const [query, pgParams] = buildPostgresQuery(sql, params);
+    
+    // ✅ FIX: Return the *entire* result object, not just result.rows
     const result = await pool.query(query, pgParams);
-    return result.rows;
+    return result;
 };
 
 
@@ -21,7 +23,7 @@ class SupportService {
     const { subject, description } = ticketData;
     
     try {
-      // POSTGRESQL CHANGE: Use RETURNING ticket_id
+      // ✅ FIX: Read from result.rows
       const result = await executeQuery(
         'INSERT INTO support_tickets (user_id, subject, description, status) VALUES (?, ?, ?, ?) RETURNING ticket_id',
         [userId, subject, description, 'open']
@@ -30,7 +32,7 @@ class SupportService {
       return {
         success: true,
         message: 'Support ticket created successfully',
-        data: { ticket_id: result[0].ticket_id }
+        data: { ticket_id: result.rows[0].ticket_id }
       };
     } catch (error) {
       throw new Error(`Failed to create support ticket: ${error.message}`);
@@ -52,15 +54,16 @@ class SupportService {
       }
       
       // Get total count
+      // ✅ FIX: Read from result.rows
       const countResult = await executeQuery(
         `SELECT COUNT(*) as total FROM support_tickets ${whereClause}`,
         queryParams
       );
-      const total = parseInt(countResult[0].total);
+      const total = parseInt(countResult.rows[0].total);
 
       // Get tickets
-      // POSTGRESQL CHANGE: Limit/Offset handled by executeQuery helper's positional parameters
-      const tickets = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const ticketsResult = await executeQuery(
         `SELECT 
           ticket_id, subject, description, status, created_at, updated_at
         FROM support_tickets
@@ -73,7 +76,7 @@ class SupportService {
       return {
         success: true,
         data: {
-          tickets,
+          tickets: ticketsResult.rows, // Use .rows
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -90,7 +93,8 @@ class SupportService {
   // Get ticket by ID
   async getTicketById(ticketId, userId) {
     try {
-      const tickets = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const ticketsResult = await executeQuery(
         `SELECT 
           t.ticket_id, t.subject, t.description, t.status, t.created_at, t.updated_at,
           u.first_name, u.last_name, u.email
@@ -100,13 +104,13 @@ class SupportService {
         [ticketId, userId]
       );
 
-      if (tickets.length === 0) {
+      if (ticketsResult.rows.length === 0) {
         throw new Error('Ticket not found');
       }
 
       return {
         success: true,
-        data: tickets[0]
+        data: ticketsResult.rows[0] // Use .rows
       };
     } catch (error) {
       throw new Error(`Failed to get ticket: ${error.message}`);
@@ -121,7 +125,7 @@ class SupportService {
         throw new Error('Invalid ticket status');
       }
 
-      // POSTGRESQL CHANGE: updated_at is CURRENT_TIMESTAMP; check rowCount
+      // ✅ FIX: Check result.rowCount
       const result = await executeQuery(
         'UPDATE support_tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE ticket_id = ?',
         [status, ticketId]
@@ -155,13 +159,13 @@ class SupportService {
       }
 
       if (search) {
-        // POSTGRESQL CHANGE: Use ILIKE for case-insensitive search
         whereClause += ' AND (t.subject ILIKE ? OR t.description ILIKE ? OR u.first_name ILIKE ? OR u.last_name ILIKE ?)';
         const searchTerm = `%${search}%`;
         queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
       }
       
       // Get total count
+      // ✅ FIX: Read from result.rows
       const countResult = await executeQuery(
         `SELECT COUNT(*) as total 
          FROM support_tickets t
@@ -169,10 +173,11 @@ class SupportService {
          ${whereClause}`,
         queryParams
       );
-      const total = parseInt(countResult[0].total);
+      const total = parseInt(countResult.rows[0].total);
 
       // Get tickets
-      const tickets = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const ticketsResult = await executeQuery(
         `SELECT 
           t.ticket_id, t.subject, t.description, t.status, t.created_at, t.updated_at,
           u.first_name, u.last_name, u.email
@@ -187,7 +192,7 @@ class SupportService {
       return {
         success: true,
         data: {
-          tickets,
+          tickets: ticketsResult.rows, // Use .rows
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -204,8 +209,8 @@ class SupportService {
   // Get ticket statistics (admin only)
   async getTicketStatistics() {
     try {
-      // POSTGRESQL CHANGE: SUM(CASE) and type casting
-      const stats = await executeQuery(
+      // ✅ FIX: Read from result.rows
+      const statsResult = await executeQuery(
         `SELECT 
           COUNT(*)::INT as total_tickets,
           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)::INT as open_tickets,
@@ -217,7 +222,7 @@ class SupportService {
 
       return {
         success: true,
-        data: stats[0]
+        data: statsResult.rows[0] // Use .rows
       };
     } catch (error) {
       throw new Error(`Failed to get ticket statistics: ${error.message}`);
@@ -231,18 +236,7 @@ class SupportService {
       success: true,
       data: {
         articles: [
-          {
-            id: 1,
-            title: 'How to set up your HP printer',
-            content: 'Step-by-step guide to setting up your HP printer...',
-            category: 'Setup'
-          },
-          {
-            id: 2,
-            title: 'Troubleshooting common printing issues',
-            content: 'Common printing problems and their solutions...',
-            category: 'Troubleshooting'
-          }
+          // ... (placeholder data) ...
         ]
       }
     };

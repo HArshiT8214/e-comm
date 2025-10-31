@@ -1,28 +1,33 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// Vercel injects POSTGRES_URL from Supabase integration
-const databaseUrl = process.env.POSTGRES_URL || 
-                    // CRITICAL FIX: Changed DB_NAME to DB_DATABASE
-                    `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT || 5432}/${process.env.DB_DATABASE}`;
+// Vercel automatically injects this variable from your Supabase integration
+const databaseUrl = process.env.POSTGRES_URL;
 
-// Create connection pool using the URL
+if (!databaseUrl) {
+  // This will be the error you see in Vercel logs if variables are missing
+  throw new Error("Database configuration error: POSTGRES_URL environment variable is not set.");
+}
+
+// Create connection pool using the Vercel/Supabase URL
 const pool = new Pool({
   connectionString: databaseUrl,
-  // Add SSL settings for external PostgreSQL providers like Supabase
+  // This is required for connecting to most cloud-hosted PostgreSQL instances
   ssl: {
     rejectUnauthorized: false
   }
 });
 
-// Test database connection (optional, ensure it doesn't run on file load)
+// Test database connection (optional)
 const testConnection = async () => {
+  let client;
   try {
-    const client = await pool.connect();
+    client = await pool.connect();
     console.log('✅ PostgreSQL Database connected successfully');
     client.release();
   } catch (error) {
     console.error('❌ PostgreSQL Database connection failed:', error.message);
+    if (client) client.release();
     throw new Error(`Database connection failed: ${error.message}`);
   }
 };

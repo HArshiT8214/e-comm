@@ -22,12 +22,11 @@ class InventoryService {
   async getInventoryOverview(page = 1, limit = 10, filters = {}) {
     try {
       const offset = (page - 1) * limit;
-      let whereClause = 'WHERE TRUE'; // Use TRUE for PostgreSQL
+      let whereClause = 'WHERE TRUE'; 
       const queryParams = [];
-      let paramCount = 1; // Start count for dynamic placeholders
+      let paramCount = 1; 
 
       if (filters.search) {
-        // Use ILIKE for case-insensitive search
         whereClause += ` AND (p.name ILIKE $${paramCount} OR p.sku ILIKE $${paramCount + 1})`;
         const searchTerm = `%${filters.search}%`;
         queryParams.push(searchTerm, searchTerm);
@@ -39,7 +38,6 @@ class InventoryService {
       }
 
       // --- Get total count ---
-      // ✅ FIX: Removed invalid JOIN on 'categories'
       const countQuery = `
         SELECT COUNT(*)::INT as total
         FROM products p
@@ -49,7 +47,6 @@ class InventoryService {
       const total = parseInt(countResult[0].total);
 
       // --- Get inventory data ---
-      // ✅ FIX: Removed invalid JOIN on 'categories', selected 'p.category'
       const inventoryQuery = `
         SELECT 
           p.product_id,
@@ -76,13 +73,11 @@ class InventoryService {
           p.name ASC
         LIMIT $${paramCount} OFFSET $${paramCount + 1}
       `;
-      // Pagination parameters are added directly to the queryParams array
       queryParams.push(limit, offset);
 
       const inventory = await this.executeQuery(inventoryQuery, queryParams);
 
       // --- Get stock summary ---
-      // ✅ FIX: Removed 'whereClause.replace' logic, just reuse params
       const summaryQuery = `
         SELECT 
           COUNT(*)::INT as total_products,
@@ -94,7 +89,6 @@ class InventoryService {
         ${whereClause}
       `;
       
-      // Remove limit/offset parameters for the summary query
       const summaryParams = queryParams.slice(0, queryParams.length - 2); 
       const stockSummary = await this.executeQuery(summaryQuery, summaryParams);
 
@@ -120,7 +114,6 @@ class InventoryService {
     try {
       await client.query('BEGIN'); // Start transaction
 
-      // Get current stock
       const currentProduct = await client.query(
         'SELECT stock_quantity FROM products WHERE product_id = $1',
         [productId]
@@ -139,17 +132,16 @@ class InventoryService {
         [quantity, productId]
       );
 
-      // Record inventory movement (assuming 'inventory_movements' exists)
-      if (deltaQuantity !== 0) {
-        // await client.query(`
-        //   INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id, created_at)
-        //   VALUES ($1, $2, $3, 'admin_adjustment', $4, CURRENT_TIMESTAMP)
-        // `, [productId, deltaQuantity, reason, adminUserId]);
-      }
+      // ✅ FIX: Commented out query to non-existent 'inventory_movements' table
+      // if (deltaQuantity !== 0) {
+      //   await client.query(`
+      //     INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id, created_at)
+      //     VALUES ($1, $2, $3, 'admin_adjustment', $4, CURRENT_TIMESTAMP)
+      //   `, [productId, deltaQuantity, reason, adminUserId]);
+      // }
 
       await client.query('COMMIT'); // Commit transaction
 
-      // ✅ FIX: Removed invalid JOIN on 'categories'
       const updatedProductResult = await client.query(`
         SELECT 
           p.product_id, p.name, p.sku, p.stock_quantity, p.price, p.category as category_name
@@ -173,56 +165,27 @@ class InventoryService {
 
   // Get inventory movements/history for a product
   async getInventoryMovements(productId, page = 1, limit = 10) {
-    // This method assumes 'inventory_movements' table exists
+    // ✅ FIX: This table does not exist. Return empty data to prevent crash.
+    console.warn("WARN: 'inventory_movements' table does not exist in schema. Returning empty array.");
+    return {
+        movements: [],
+        currentStock: 0,
+        pagination: { page, limit, total: 0, totalPages: 0 }
+    };
+    
+    /* // This code will crash the function:
     try {
-      const offset = (page - 1) * limit;
-
-      // Get total count
-      const countResult = await this.executeQuery(
-        'SELECT COUNT(*) as total FROM inventory_movements WHERE product_id = ?',
-        [productId]
-      );
-      const total = parseInt(countResult[0].total);
-
-      // Get movements with pagination
-      const movementsQuery = `
-        SELECT 
-          im.movement_id, im.delta_quantity, im.reason, im.reference_type, im.reference_id, im.created_at,
-          p.name as product_name, p.sku
-        FROM inventory_movements im
-        JOIN products p ON im.product_id = p.product_id
-        WHERE im.product_id = ?
-        ORDER BY im.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-      const movements = await this.executeQuery(movementsQuery, [productId, limit, offset]);
-
-      // Get current stock for context
-      const currentStockResult = await this.executeQuery(
-        'SELECT stock_quantity FROM products WHERE product_id = ?',
-        [productId]
-      );
-
-      return {
-        movements: movements,
-        currentStock: currentStockResult[0]?.stock_quantity || 0,
-        pagination: {
-          page,
-          limit,
-          total: total,
-          totalPages: Math.ceil(total / limit)
-        }
-      };
+      // ... (queries to inventory_movements) ...
     } catch (error) {
       console.error('❌ POSTGRESQL SQL ERROR in getInventoryMovements:', error.message, error.stack);
       throw new Error(`Failed to fetch inventory movements: ${error.message}`);
     }
+    */
   }
 
   // Get low stock alerts
   async getLowStockAlerts(threshold = 10) {
     try {
-      // ✅ FIX: Removed invalid JOIN on 'categories', selected 'p.category'
       const alerts = await this.executeQuery(`
         SELECT 
           p.product_id, p.name, p.sku, p.stock_quantity, p.price, p.category as category_name
@@ -241,7 +204,6 @@ class InventoryService {
   // Get out of stock products
   async getOutOfStockProducts() {
     try {
-      // ✅ FIX: Removed invalid JOIN on 'categories', selected 'p.category'
       const products = await this.executeQuery(`
         SELECT 
           p.product_id, p.name, p.sku, p.stock_quantity, p.price, p.category as category_name, p.updated_at
@@ -266,7 +228,43 @@ class InventoryService {
       const results = [];
 
       for (const update of updates) {
-        // ... (This logic is fine as it only references 'products' table) ...
+        const { productId, quantity } = update;
+
+        const currentProductResult = await client.query(
+          'SELECT stock_quantity FROM products WHERE product_id = $1',
+          [productId]
+        );
+        const currentProduct = currentProductResult.rows;
+
+        if (currentProduct.length === 0) {
+          results.push({ productId, success: false, error: 'Product not found' });
+          continue;
+        }
+
+        const currentStock = currentProduct[0].stock_quantity;
+        const deltaQuantity = quantity - currentStock;
+
+        // Update product stock
+        await client.query(
+          'UPDATE products SET stock_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE product_id = $2',
+          [quantity, productId]
+        );
+
+        // ✅ FIX: Commented out query to non-existent 'inventory_movements' table
+        // if (deltaQuantity !== 0) {
+        //   await client.query(`
+        //     INSERT INTO inventory_movements (product_id, delta_quantity, reason, reference_type, reference_id, created_at)
+        //     VALUES ($1, $2, $3, 'bulk_admin_adjustment', $4, CURRENT_TIMESTAMP)
+        //   `, [productId, deltaQuantity, reason, adminUserId]);
+        // }
+
+        results.push({
+          productId,
+          success: true,
+          oldStock: currentStock,
+          newStock: quantity,
+          deltaQuantity
+        });
       }
 
       await client.query('COMMIT'); // Commit transaction
