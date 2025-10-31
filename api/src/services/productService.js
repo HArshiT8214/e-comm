@@ -23,14 +23,14 @@ class ProductService {
   }
 
   // ------------------------------------------------------------------
-  // Public Methods (Corrected: 'category_id' replaced with 'category')
+  // Public Methods (Corrected: 'product_images' query REMOVED)
   // ------------------------------------------------------------------
 
   async getProducts(filters = {}) {
     const {
       page = 1,
       limit = 10,
-      category, // ✅ FIX: Renamed from category_id
+      category,
       search,
       min_price,
       max_price,
@@ -46,7 +46,6 @@ class ProductService {
       let queryParams = [];
 
       // --- Filters ---
-      // ✅ FIX: Filter by the 'category' varchar column
       if (category) {
         whereConditions.push('p.category = ?');
         queryParams.push(category);
@@ -91,12 +90,11 @@ class ProductService {
       const total = parseInt(countResult[0].total);
 
       // --- Products query ---
-      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
           p.image_url, p.brand, p.created_at,
-          p.category as category_name, -- Use the varchar column
+          p.category as category_name,
           COALESCE(AVG(r.rating), 0) as average_rating,
           COUNT(r.review_id) as review_count
         FROM products p
@@ -112,14 +110,8 @@ class ProductService {
       const productParams = [...queryParams, queryLimit, offset]; 
       const products = await this.executeQuery(productsQuery, productParams);
 
-      // --- Attach product images ---
-      for (let product of products) {
-        // This query assumes a 'product_images' table exists. 
-        // If it doesn't, this will also fail.
-        const imagesQuery = 'SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order';
-        const images = await this.executeQuery(imagesQuery, [product.product_id]);
-        product.images = images;
-      }
+      // ✅ FIX: Removed loop that queried the non-existent 'product_images' table.
+      // The 'image_url' from the 'products' table is already included.
 
       return {
         success: true,
@@ -149,7 +141,6 @@ class ProductService {
 
   async getProductById(productId) {
     try {
-      // ✅ FIX: Removed invalid JOIN on categories. Select p.category directly.
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.description, p.price, p.stock_quantity, p.sku,
@@ -165,14 +156,12 @@ class ProductService {
       const products = await this.executeQuery(productsQuery, [productId]);
 
       if (products.length === 0) {
-        throw new Error('Product not found');
+        throw new Error('Product not. found');
       }
       const product = products[0];
       
-      const images = await this.executeQuery('SELECT url, alt_text, display_order FROM product_images WHERE product_id = ? ORDER BY display_order', [product.product_id]);
-      product.images = images;
+      // ✅ FIX: Removed query for non-existent 'product_images' table.
       
-      // ✅ FIX: Use p.category for related products
       const relatedProductsQuery = `
         SELECT product_id, name, price, image_url, sku
         FROM products 
@@ -190,7 +179,6 @@ class ProductService {
 
   async getCategories() {
     try {
-      // ✅ FIX: Select distinct categories directly from the products table
       const categoriesQuery = `
         SELECT 
           category as name,
@@ -208,7 +196,6 @@ class ProductService {
   }
   
   async createProduct(productData) {
-    // ✅ FIX: Use 'category' (string) instead of 'category_id' (int)
     const { name, description, category, price, stock_quantity, sku, brand = 'HP', image_url } = productData;
 
     try {
@@ -221,7 +208,6 @@ class ProductService {
         throw new Error('Product with this SKU already exists');
       }
 
-      // ✅ FIX: Changed column name 'category_id' to 'category'
       const insertQuery = `
         INSERT INTO products (name, description, category, price, stock_quantity, sku, brand, image_url) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -243,11 +229,9 @@ class ProductService {
   }
 
   async updateProduct(productId, productData) {
-    // ✅ FIX: Use 'category' instead of 'category_id'
     const { name, description, category, price, stock_quantity, sku, brand, image_url } = productData;
 
     try {
-      // ✅ FIX: Changed column name 'category_id' to 'category'
       const updateQuery = `
         UPDATE products 
         SET name = ?, description = ?, category = ?, price = ?, stock_quantity = ?, sku = ?, brand = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
@@ -273,7 +257,6 @@ class ProductService {
 
   async deleteProduct(productId) {
     try {
-      // This is already correct (it doesn't reference category)
       const result = await this.executeQuery(
         'DELETE FROM products WHERE product_id = ?',
         [productId]
@@ -294,7 +277,6 @@ class ProductService {
 
   async updateStock(productId, quantity, reason = 'adjustment') {
     try {
-      // This function is database-agnostic and correct
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -329,7 +311,6 @@ class ProductService {
 
   async getFeaturedProducts(limit = 8) {
     try {
-      // This is already correct (it doesn't reference category)
       const productsQuery = `
         SELECT 
           p.product_id, p.name, p.price, p.image_url, p.sku,
