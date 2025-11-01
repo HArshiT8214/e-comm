@@ -9,25 +9,18 @@
       }
     },
     {
-      "src": "api/src/index.js",
+      "src": "api/index.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "api/src/index.js"
+      "dest": "/api"
     },
     {
       "src": "/health",
-      "dest": "api/src/index.js"
-    },
-    {
-      "src": "/admin",
-      "status": 308,
-      "headers": {
-        "Location": "/admin/dashboard"
-      }
+      "dest": "/api"
     },
     {
       "src": "/static/(.*)",
@@ -50,6 +43,12 @@
       "dest": "/frontend/build/index.html"
     }
   ],
+  "functions": {
+    "api/index.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
   "env": {
     "REACT_APP_API_BASE_URL": "/api",
     "REACT_APP_ENVIRONMENT": "production"
