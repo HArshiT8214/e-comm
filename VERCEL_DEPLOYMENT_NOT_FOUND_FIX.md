@@ -11,8 +11,9 @@ This document explains the root cause, fix, and concepts behind the `DEPLOYMENT_
 ### Changes Made
 
 1. **Created `api/index.js`** - A new entry point for Vercel serverless functions
-2. **Updated `vercel.json`** - Fixed the build configuration paths
+2. **Updated `vercel.json`** - Removed conflicting `builds` property, used modern auto-detection instead
 3. **Added `@vercel/node`** - Added the required dependency to `api/package.json`
+4. **Added explicit build commands** - Since we're in a subdirectory structure, added `installCommand` and `buildCommand`
 
 ### Files Modified
 
@@ -30,48 +31,45 @@ api/package.json
 **vercel.json:**
 ```json
 {
-  "version": 2,
-  "builds": [
+  "installCommand": "cd frontend && npm install && cd ../api && npm install",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/build",
+  "rewrites": [
     {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build"
-      }
+      "source": "/api/(.*)",
+      "destination": "/api"
     },
     {
-      "src": "api/index.js",
-      "use": "@vercel/node"
+      "source": "/health",
+      "destination": "/api"
     }
   ],
-  "routes": [
+  "headers": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        }
+      ]
     },
     {
-      "src": "/health",
-      "dest": "/api"
-    },
-    {
-      "src": "/static/(.*)",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
-      },
-      "dest": "/frontend/build/static/$1"
-    },
-    {
-      "src": "/favicon.ico",
-      "dest": "/frontend/build/favicon.ico"
-    },
-    {
-      "src": "/(.*)",
-      "headers": {
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "X-XSS-Protection": "1; mode=block"
-      },
-      "dest": "/frontend/build/index.html"
+      "source": "/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
     }
   ],
   "functions": {
@@ -126,32 +124,39 @@ The `vercel.json` was configured to:
 
 **The Issue:** Vercel couldn't find the deployment because:
 
-1. **Missing Build Dependency**: `@vercel/node` was not in `api/package.json`, so Vercel couldn't properly build the serverless function
-2. **Incorrect Path Reference**: The configuration referenced `api/src/index.js` in some places, but Vercel's build system needs a clear entry point
-3. **Build Process Confusion**: Vercel's build system couldn't properly resolve the dependencies and create the deployment
+1. **Conflicting Configuration**: The original config used both `builds` and `functions` properties, which cannot coexist in Vercel
+2. **Missing Build Dependency**: `@vercel/node` was not in `api/package.json`, so Vercel couldn't properly build the serverless function
+3. **Incorrect Path Reference**: The configuration referenced `api/src/index.js` in some places, but Vercel's build system needs a clear entry point
+4. **Build Process Confusion**: Without the modern auto-detection approach, Vercel's build system couldn't properly resolve the dependencies
 
 **The Specific Error:**
 ```
 DEPLOYMENT_NOT_FOUND: The deployment you're looking for doesn't exist or couldn't be found.
+```
+Or in our case:
+```
+The 'functions' property cannot be used in conjunction with the 'builds' property.
 ```
 
 This error occurred during the build phase because Vercel couldn't create a valid deployment package.
 
 ### What Conditions Triggered This?
 
-1. **Using `vercel.json` version 2** - This version requires explicit build configurations
+1. **Mixed Configuration Approaches** - Using legacy `builds` with modern `functions` properties
 2. **Monorepo Structure** - The project has nested directories (`api/`, `frontend/`)
 3. **Missing Dependencies** - `@vercel/node` wasn't installed
-4. **Build Failure** - Without proper dependencies, Vercel couldn't complete the build
+4. **Build Failure** - Without proper dependencies and with conflicting config, Vercel couldn't complete the build
 
 ### What Misconception Led to This?
 
-**The Misconception:** "I can configure my Express app on Vercel by just pointing to my existing entry file"
+**The Misconception:** "I can mix legacy and modern Vercel configuration approaches to get the best of both worlds"
 
 **The Reality:** Vercel's serverless architecture requires:
-1. Proper build dependencies installed in the correct directories
-2. Clear entry points that Vercel can locate
-3. Understanding of how Vercel's routing works (not traditional server routing)
+1. Choose ONE configuration approach - modern auto-detection OR legacy explicit `builds`
+2. Cannot use both `builds` and `functions` properties together
+3. Modern approach (used here) relies on auto-detection with explicit commands
+4. Clear entry points that Vercel can locate
+5. Understanding of how Vercel's routing works (not traditional server routing)
 
 ---
 
@@ -212,31 +217,47 @@ Runtime Phase:
 
 ### Understanding vercel.json
 
+**Modern Approach (Auto-Detection):**
+```json
+{
+  "installCommand": "cd frontend && npm install && cd ../api && npm install",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/build",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",            // Match pattern
+      "destination": "/api"             // Where to route
+    }
+  ],
+  "functions": {
+    "api/index.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  }
+}
+```
+
+**Legacy Approach (Explicit Builds):**
 ```json
 {
   "builds": [
     {
-      "src": "frontend/package.json",      // What to build
-      "use": "@vercel/static-build",        // How to build it
-      "config": { "distDir": "build" }     // Where output goes
-    },
-    {
-      "src": "api/index.js",               // Entry point
-      "use": "@vercel/node"                 // Runtime adapter
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",                   // Match pattern
-      "dest": "/api"                        // Where to route
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "build" }
     }
   ]
 }
 ```
 
-**Builds**: Define WHAT gets built and HOW
-**Routes**: Define HOW requests are routed at runtime
-**Functions**: Configure serverless function settings
+**Key Point**: You **cannot** use both `builds` and `functions` together!
+
+**Modern Approach**: Vercel auto-detects frameworks, you provide commands
+**Rewrites**: Modern syntax using `source`/`destination`
+**Functions**: Configure serverless function settings (memory, timeout)
+**InstallCommand**: Tell Vercel how to install dependencies in subdirectories
+**BuildCommand**: Tell Vercel how to build your frontend
 
 ### Why This Error Exists
 
@@ -257,7 +278,22 @@ Runtime Phase:
 
 **Red Flags:**
 
-1. **Missing Build Dependencies**
+1. **Mixing `builds` and `functions`**
+   ```json
+   // ❌ Bad: Cannot use both!
+   {
+     "builds": [...],
+     "functions": {...}
+   }
+   
+   // ✅ Good: Choose ONE approach
+   // Modern (recommended):
+   { "functions": {...} }
+   // OR Legacy:
+   { "builds": [...] }
+   ```
+
+2. **Missing Build Dependencies**
    ```json
    // ❌ Bad: Using @vercel/node without installing it
    "builds": [
@@ -268,7 +304,7 @@ Runtime Phase:
    npm install @vercel/node --save
    ```
 
-2. **Confusing Paths**
+3. **Confusing Paths**
    ```json
    // ❌ Bad: Unclear entry point
    { "src": "api/src/index.js", "use": "@vercel/node" }
@@ -300,29 +336,36 @@ Runtime Phase:
 
 ### Common Mistakes to Avoid
 
-**Mistake 1: Assuming Auto-Detection**
-```javascript
-// Don't assume Vercel will automatically:
-// - Find your Express app
-// - Install dependencies
-// - Create proper entry points
-// - Configure routing
-
-// Instead: Be explicit in vercel.json
-```
-
-**Mistake 2: Using v1 vs v2 Configuration**
+**Mistake 1: Mixing Configuration Approaches**
 ```json
-// v1: Minimal config, relies on auto-detection
+// ❌ Bad: Cannot use both builds and functions
 {
-  "version": 1
+  "builds": [...],
+  "functions": { "api/index.js": {...} }
 }
 
-// v2: Explicit config, more control
+// ✅ Good: Choose ONE approach
+// Modern:
 {
-  "version": 2,
-  "builds": [...],
-  "routes": [...]
+  "functions": { "api/index.js": {...} }
+}
+// OR Legacy:
+{
+  "builds": [...]
+}
+```
+
+**Mistake 2: Assuming Auto-Detection Works Everywhere**
+```json
+// Don't assume Vercel will automatically:
+// - Find your Express app in subdirectories
+// - Install dependencies in multiple folders
+// - Know your build commands
+
+// Instead: Be explicit
+{
+  "installCommand": "cd frontend && npm install && cd ../api && npm install",
+  "buildCommand": "cd frontend && npm run build"
 }
 ```
 
@@ -334,6 +377,22 @@ app.listen(3000);
 
 // ✅ Export for serverless
 module.exports = app;
+```
+
+**Mistake 4: Using Legacy with Modern Properties**
+```json
+// ❌ Using version 2 with both builds and functions
+{
+  "version": 2,
+  "builds": [...],
+  "functions": {...}  // Conflicts!
+}
+
+// ✅ Modern approach doesn't need version
+{
+  "functions": {...},  // No builds property
+  "rewrites": [...]
+}
 ```
 
 ### Code Smells
