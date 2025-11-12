@@ -48,6 +48,9 @@ try {
   const app = express();
   const PORT = process.env.PORT || 3001; 
 
+  app.get('/', (req, res) => res.send('Backend root is live ✅'));
+  app.get('/products/debug', (req, res) => res.send('Products route active ✅'));
+
   // Security middleware
   app.use(helmet());
 
