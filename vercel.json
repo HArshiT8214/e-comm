@@ -4,12 +4,8 @@
   "outputDirectory": "frontend/build",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/health",
-      "destination": "/api"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
