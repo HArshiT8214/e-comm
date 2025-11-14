@@ -4,30 +4,46 @@
 const app = require('../backend/src/index.js');
 
 // Vercel serverless function handler
-// Vercel automatically routes /api/* to this function
-// We need to strip the /api prefix from the path so Express routes match correctly
+// When Vercel routes /api/* to this function, it may pass the path in different ways
+// We need to extract the actual route path and strip the /api prefix
 module.exports = (req, res) => {
-  // Get the original path from various possible locations
-  let path = req.url || req.path || req.originalUrl || '/';
+  // Vercel passes the path in req.url
+  // For /api/products, req.url might be "/products" (already stripped) or "/api/products"
+  // We need to handle both cases
   
-  // Vercel should strip /api automatically, but ensure it's stripped
-  // Handle cases like: /api/products, /api/products/categories/list, etc.
+  let path = req.url || '/';
+  
+  // If path still has /api prefix, strip it
   if (path.startsWith('/api')) {
     path = path.replace(/^\/api\/?/, '') || '/';
   }
   
-  // Ensure path starts with / (handle empty string case)
-  if (!path || path === '' || !path.startsWith('/')) {
-    path = '/' + (path || '');
+  // Handle empty path
+  if (!path || path === '') {
+    path = '/';
   }
   
-  // Normalize the path (remove double slashes, etc.)
+  // Ensure path starts with /
+  if (!path.startsWith('/')) {
+    path = '/' + path;
+  }
+  
+  // Normalize path (remove double slashes)
   path = path.replace(/\/+/g, '/');
   
-  // Update all path-related properties on the request object
+  // Update request object with cleaned path
   req.url = path;
   req.path = path;
-  req.originalUrl = req.originalUrl ? req.originalUrl.replace(/^\/api\/?/, '') || '/' : path;
+  
+  // Update originalUrl if it exists
+  if (req.originalUrl) {
+    if (req.originalUrl.startsWith('/api')) {
+      req.originalUrl = req.originalUrl.replace(/^\/api\/?/, '') || '/';
+    }
+  } else {
+    req.originalUrl = path;
+  }
+  
   req.baseUrl = '';
   
   // Pass to Express app

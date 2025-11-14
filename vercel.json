@@ -2,10 +2,19 @@
   "installCommand": "cd frontend && npm install && cd ../backend && npm install",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/build",
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
     {
       "source": "/:path*",
-      "destination": "/index.html"
+      "destination": "/index.html",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept",
+          "value": "text/html"
+        }
+      ]
     }
   ],
   "headers": [
