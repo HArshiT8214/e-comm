@@ -9,14 +9,14 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 // Import middleware & routes
-const errorHandler = require('./middleware/errorHandler');
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const cartRoutes = require('./routes/cart');
-const orderRoutes = require('./routes/orders');
-const reviewRoutes = require('./routes/reviews');
-const supportRoutes = require('./routes/support');
-const adminRoutes = require('./routes/admin');
+const errorHandler = require('./middleware/errorHandler.js');
+const authRoutes = require('./routes/auth.js');
+const productRoutes = require('./routes/products.js');
+const cartRoutes = require('./routes/cart.js');
+const orderRoutes = require('./routes/orders.js');
+const reviewRoutes = require('./routes/reviews.js');
+const supportRoutes = require('./routes/support.js');
+const adminRoutes = require('./routes/admin.js');
 
 // Initialize app
 const app = express();
