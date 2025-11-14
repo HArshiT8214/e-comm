@@ -1,120 +1,88 @@
+// backend/src/index.js
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
-// ✅ --- DEBUG LOG 1 ---
-console.log('SERVER-SIDE: Function initializing... Loading dependencies.');
+// Load environment variables
+require('dotenv').config();
 
-try {
-  // ✅ --- DEBUG LOG 2 ---
-  console.log('SERVER-SIDE: Loading dotenv...');
-  require('dotenv').config();
+// Import middleware & routes
+const errorHandler = require('./middleware/errorHandler');
+const authRoutes = require('./routes/auth');
+const productRoutes = require('./routes/products');
+const cartRoutes = require('./routes/cart');
+const orderRoutes = require('./routes/orders');
+const reviewRoutes = require('./routes/reviews');
+const supportRoutes = require('./routes/support');
+const adminRoutes = require('./routes/admin');
 
-  // ✅ --- DEBUG LOG 3 ---
-  console.log('SERVER-SIDE: Loading errorHandler...');
-  const errorHandler = require('./middleware/errorHandler');
+// Initialize app
+const app = express();
 
-  // ✅ --- DEBUG LOG 4 ---
-  console.log('SERVER-SIDE: Loading auth routes...');
-  const authRoutes = require('./routes/auth');
+// ----------- DEBUG ROUTES (KEEP ABOVE 404 HANDLER) -----------
+app.get('/', (req, res) => res.send('Backend root is live ✅'));
+app.get('/products/debug', (req, res) => res.send('Products route active ✅'));
 
-  // ✅ --- DEBUG LOG 5 ---
-  console.log('SERVER-SIDE: Loading product routes...');
-  const productRoutes = require('./routes/products');
+// Security Middleware
+app.use(helmet());
 
-  // ✅ --- DEBUG LOG 6 ---
-  console.log('SERVER-SIDE: Loading cart routes...');
-  const cartRoutes = require('./routes/cart');
+// CORS (Important for Vercel + React)
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "*",
+    credentials: true,
+  })
+);
 
-  // ✅ --- DEBUG LOG 7 ---
-  console.log('SERVER-SIDE: Loading order routes...');
-  const orderRoutes = require('./routes/orders');
+// Rate Limiter
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 200,
+    message: { success: false, message: "Too many requests. Try again later." },
+  })
+);
 
-  // ✅ --- DEBUG LOG 8 ---
-  console.log('SERVER-SIDE: Loading review routes...');
-  const reviewRoutes = require('./routes/reviews');
+// Body Parsers
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-  // ✅ --- DEBUG LOG 9 ---
-  console.log('SERVER-SIDE: Loading support routes...');
-  const supportRoutes = require('./routes/support');
-
-  // ✅ --- DEBUG LOG 10 ---
-  console.log('SERVER-SIDE: Loading admin routes...');
-  const adminRoutes = require('./routes/admin');
-
-  // ✅ --- DEBUG LOG 11 ---
-  console.log('SERVER-SIDE: All modules loaded. Configuring Express app...');
-  const app = express();
-  const PORT = process.env.PORT || 3001; 
-
-  app.get('/', (req, res) => res.send('Backend root is live ✅'));
-  app.get('/products/debug', (req, res) => res.send('Products route active ✅'));
-
-  // Security middleware
-  app.use(helmet());
-
-  // CORS configuration
-  app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    credentials: true
-  }));
-
-  // Rate limiting
-  const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: {
-      success: false,
-      message: 'Too many requests from this IP, please try again later.'
-    }
+// ------------ HEALTH CHECK ------------
+app.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    message: "HP Printer Shop API running",
+    timestamp: new Date().toISOString(),
   });
-  app.use(limiter);
+});
 
-  // Body parsing middleware
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// ------------ MAIN API ROUTES (IMPORTANT!) ------------
+app.use('/auth', authRoutes);
+app.use('/products', productRoutes);
+app.use('/cart', cartRoutes);
+app.use('/orders', orderRoutes);
+app.use('/reviews', reviewRoutes);
+app.use('/support', supportRoutes);
+app.use('/admin', adminRoutes);
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
-    res.json({
-      success: true,
-      message: 'HP Printer Shop API is running',
-      timestamp: new Date().toISOString()
-    });
+// ------------ 404 HANDLER (KEEP LAST ALWAYS) ------------
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API endpoint not found",
   });
+});
 
-  // API routes
-  app.use('/auth', authRoutes);
-  app.use('/products', productRoutes);
-  app.use('/cart', cartRoutes);
-  app.use('/orders', orderRoutes);
-  app.use('/reviews', reviewRoutes);
-  app.use('/support', supportRoutes);
-  app.use('/admin', adminRoutes);
+// ------------ GLOBAL ERROR HANDLER ------------
+app.use(errorHandler);
 
-  // 404 handler
-  app.use((req, res) => {
-    res.status(404).json({
-      success: false,
-      message: 'API endpoint not found'
-    });
-  });
+// Export for Vercel Serverless
+module.exports = app;
 
-  // Error handling middleware
-  app.use(errorHandler);
-
-  // ✅ --- DEBUG LOG 12 ---
-  console.log('SERVER-SIDE: Express app configured. Exporting handler.');
-
-  module.exports = app;
-
-} catch (error) {
-  // ✅ --- DEBUG LOG 13 (CRITICAL) ---
-  // If the crash happens during initialization, this will log it.
-  console.error('SERVER-SIDE: CRASH DURING INITIALIZATION ❌');
-  console.error(error);
-  
-  // Re-throw to ensure Vercel knows the function failed
-  throw error;
+// Optional: run locally if not serverless
+if (require.main === module) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
