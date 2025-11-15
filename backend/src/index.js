@@ -31,7 +31,7 @@ app.use(helmet());
 // CORS (Important for Vercel + React)
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "https://hp-printer-ecommerce.vercel.app",
     credentials: true,
   })
 );

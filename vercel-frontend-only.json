@@ -25,6 +25,15 @@
           "value": "1; mode=block"
         }
       ]
+    },
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
     }
   ],
   "env": {
@@ -32,3 +41,4 @@
     "REACT_APP_ENVIRONMENT": "production"
   }
 }
+
