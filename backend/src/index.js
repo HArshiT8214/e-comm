@@ -29,9 +29,45 @@ app.get('/products/debug', (req, res) => res.send('Products route active ✅'));
 app.use(helmet());
 
 // CORS (Important for Vercel + React)
+// Allow both production and preview deployment URLs
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  "https://hp-printer-ecommerce.vercel.app",
+  // Allow all Vercel preview deployments
+  /^https:\/\/hp-printer-ecommerce.*\.vercel\.app$/,
+  /^https:\/\/.*-harshits-projects-.*\.vercel\.app$/,
+];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "https://hp-printer-ecommerce.vercel.app",
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      // Check if origin matches any allowed pattern
+      const isAllowed = allowedOrigins.some(allowedOrigin => {
+        if (!allowedOrigin) return false;
+        if (typeof allowedOrigin === 'string') {
+          return origin === allowedOrigin;
+        }
+        if (allowedOrigin instanceof RegExp) {
+          return allowedOrigin.test(origin);
+        }
+        return false;
+      });
+      
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        // In development, allow localhost
+        if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      }
+    },
     credentials: true,
   })
 );
