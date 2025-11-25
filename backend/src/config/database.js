@@ -1,51 +1,31 @@
+// database.js
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// Support multiple database providers:
-// - POSTGRES_URL: Supabase, Vercel Postgres
-// - DATABASE_URL: Render PostgreSQL, Heroku, etc.
-const databaseUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  // This will be the error you see in logs if variables are missing
-  throw new Error("Database configuration error: POSTGRES_URL or DATABASE_URL environment variable is not set.");
+const rawUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+if (!rawUrl) {
+  throw new Error("Database configuration error: POSTGRES_URL or DATABASE_URL is not set.");
 }
 
-// Determine SSL configuration based on database provider
-// Supabase requires SSL with specific settings
-// Render PostgreSQL also requires SSL
-const isSupabase = databaseUrl.includes('supabase.co') || process.env.POSTGRES_URL;
+// Ensure sslmode=require for Supabase (and most managed PG)
+// Appends the flag only if it's missing.
+const hasQuery = rawUrl.includes('?');
+const hasSSLMode = /[?&]sslmode=/i.test(rawUrl);
+const databaseUrl = hasSSLMode ? rawUrl : `${rawUrl}${hasQuery ? '&' : '?'}sslmode=require`;
+
+// In production, enable TLS. For Supabase, relaxing cert verification is common on Node hosts.
 const isProduction = process.env.NODE_ENV === 'production';
 
-let sslConfig = false;
-
-if (isProduction) {
-  if (isSupabase) {
-    // Supabase requires SSL with rejectUnauthorized: false
-    sslConfig = {
-      rejectUnauthorized: false,
-      require: true
-    };
-  } else {
-    // Render PostgreSQL or other managed databases
-    sslConfig = {
-      rejectUnauthorized: false, // Allow self-signed certificates
-      require: true
-    };
-  }
-}
-
-// Create connection pool
+// Keep it simple: let the URL carry sslmode=require; tell pg to use TLS without hard-failing on CA chains.
 const pool = new Pool({
   connectionString: databaseUrl,
-  ssl: sslConfig,
-  // Connection pool settings
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection cannot be established
+  ssl: isProduction ? { rejectUnauthorized: false } : false,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
-// Test database connection (optional)
+// Optional: startup probe
 const testConnection = async () => {
   let client;
   try {
