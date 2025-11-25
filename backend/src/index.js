@@ -21,6 +21,10 @@ const adminRoutes = require('./routes/admin.js');
 // Initialize app
 const app = express();
 
+// Trust proxy (required for Render, Vercel, and other platforms behind reverse proxy)
+// This fixes the express-rate-limit X-Forwarded-For warning
+app.set('trust proxy', true);
+
 // ----------- DEBUG ROUTES (KEEP ABOVE 404 HANDLER) -----------
 app.get('/', (req, res) => res.send('Backend root is live ✅'));
 app.get('/products/debug', (req, res) => res.send('Products route active ✅'));
